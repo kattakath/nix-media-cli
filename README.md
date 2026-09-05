@@ -43,6 +43,19 @@ the cheap, regenerable one is left to a tool like [`rclip`](https://github.com/y
 Every one takes `--help`. All of them stay on `PATH` under their own names;
 `media` is additive, never a replacement.
 
+### Two more, opt-in
+
+| Command | Option | Why it is off by default |
+|---|---|---|
+| `fidelity-enhance` / `-mcp` | `fidelityEnhance.enable` | the referee for an agentic image-editing loop — judges a generated image against the original and answers retry / next-step / done. First run pulls ~1 GB of torch + insightface |
+| `obs-fb-setup` | `obsFacebookSetup.enable` | writes an OBS "Facebook" profile with researched 1080p30 screencast settings. Inert until `FB_PERSISTENT_STREAM_KEY` is in your login Keychain |
+
+These ship here so the media story is **one repo you add or strip off**, but
+they stay out of the `media-toolkit` bundle: that bundle is what the queue
+worker and the Finder Services put on their `PATH`, so every member becomes a
+runtime dependency of the queue. A uv/Python environment and a Keychain read
+have no business there.
+
 ## The queue is launchd's, not ours
 
 Re-encoding two hundred videos is hours of `ffmpeg`. Doing that inside an
@@ -98,6 +111,8 @@ nix run github:kattakath/nix-media-cli#photo-describe -- ~/Pictures/holiday
 | `ollamaHost` | `127.0.0.1:11434` | exported as `OLLAMA_HOST` |
 | `logRelPath` | `Library/Logs/nix-media-queue.log` | where Console.app looks |
 | `extraSearchPackages` | `[ pkgs.exiftool ]` | companion tools; `[ ]` for none |
+| `fidelityEnhance.enable` | `false` | the agentic-loop referee (~1 GB first run) |
+| `obsFacebookSetup.enable` | `false` | the OBS Facebook Live profile writer |
 
 ## Requirements
 

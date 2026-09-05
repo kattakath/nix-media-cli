@@ -82,6 +82,8 @@ let
   media-quick-actions = pkgs.callPackage ../packages/media-quick-actions.nix {
     inherit media-toolkit media-queue;
   };
+  fidelity-enhance = pkgs.callPackage ../packages/fidelity-enhance.nix { };
+  obs-fb-setup = pkgs.callPackage ../packages/obs-fb-setup.nix { };
 
   stateDir = "${config.home.homeDirectory}/Library/Application Support/nix-media-queue";
   logFile = "${config.home.homeDirectory}/${cfg.logRelPath}";
@@ -152,6 +154,33 @@ in
       '';
     };
 
+    # The two media-ADJACENT tools. They ship in this flake so the whole media
+    # story is one repo you can add or strip off, but they are opt-in and stay
+    # out of the media-toolkit bundle — see the two membership questions in
+    # packages/media-toolkit.nix. Neither is wanted by default: one is a
+    # gigabyte, the other does nothing without a Keychain secret.
+    fidelityEnhance.enable = lib.mkEnableOption ''
+      `fidelity-enhance` + `fidelity-enhance-mcp` — the referee for an agentic
+      image-editing loop. It judges a generated image against the original and
+      answers retry / next-step / done; it generates nothing itself.
+
+      OFF BY DEFAULT because the first run is expensive, not because it is
+      unreliable: the identity and perceptual extras pull torch and insightface,
+      on the order of a gigabyte, which uv downloads once and then caches. Warm
+      it deliberately with `fidelity-enhance capabilities` before wiring the MCP
+      server into an agent, or the first tool call will look like a hang
+    '';
+
+    obsFacebookSetup.enable = lib.mkEnableOption ''
+      `obs-fb-setup` — write an OBS "Facebook" profile with researched
+      screencast-to-Facebook-Live settings (1080p30, no downscale, Apple VT
+      H264 hardware encoder, CBR 6000 kbps).
+
+      OFF BY DEFAULT because it is inert until you put the stream key in the
+      login Keychain as `FB_PERSISTENT_STREAM_KEY`. The key is read live at run
+      time and never enters git or the Nix store
+    '';
+
     extraSearchPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = with pkgs; [ exiftool ];
@@ -174,7 +203,9 @@ in
       media-toolkit
       media-queue
     ]
-    ++ cfg.extraSearchPackages;
+    ++ cfg.extraSearchPackages
+    ++ lib.optional cfg.fidelityEnhance.enable fidelity-enhance
+    ++ lib.optional cfg.obsFacebookSetup.enable obs-fb-setup;
 
     # OLLAMA_HOST only. `visionModel` is threaded into photo-describe at BUILD
     # time (see its `defaultModel` argument) rather than exported here — an env

@@ -19,18 +19,34 @@
 # happened once: extract-audio shipped as a flake package but was never added
 # to home.nix, so it was reachable by `nix run` and absent from PATH.
 #
-# Membership rule — what belongs here is a CLI that ACTS ON A MEDIA FILE the
-# operator selected, on this machine. That is the line that keeps the bundle
-# meaningful:
+# TWO DIFFERENT MEMBERSHIP QUESTIONS, and conflating them is the mistake this
+# comment exists to prevent:
+#
+#   1. What ships in THIS FLAKE?  "Media work you want to add or strip off as
+#      one unit." That is a repo-scope question, and it is generous.
+#   2. What goes in THIS BUNDLE?  A CLI that ACTS ON A MEDIA FILE the operator
+#      selected, on this machine. That is a dependency-scope question, and it
+#      is strict — because `media-toolkit` is what media-worker and the Finder
+#      Services put on their PATH, so every member becomes a runtime dependency
+#      of the queue.
+#
+# `obs-fb-setup` and `fidelity-enhance` answer YES to (1) and NO to (2):
 #
 #   - obs-fb-setup writes an OBS config profile and reads a Keychain secret.
-#     It configures an app; it never touches a media file. Stays separate.
+#     It configures an app; it never touches a media file.
 #   - fidelity-enhance is an MCP server / referee for an agentic image loop,
-#     running an ephemeral uv environment. It judges images, generating and
-#     transforming nothing. Stays separate.
+#     running an ephemeral uv environment (~1 GB of torch/insightface on first
+#     run). It judges images, generating and transforming nothing.
 #
-# Both are media-ADJACENT, and folding them in would make "media-toolkit" mean
-# only "vaguely about media", which is not a useful thing for it to mean.
+# So they live in this flake, behind their own opt-in module options, and stay
+# OUT of this bundle. Folding them in would put a uv/Python environment and a
+# Keychain read on the media queue worker's PATH for no reason, and would make
+# "media-toolkit" mean only "vaguely about media", which is not a useful thing
+# for it to mean.
+#
+# (Earlier revisions of this header said both "stay separate" full stop, from
+# when this file lived in a mono-repo where separate-from-the-bundle and
+# separate-from-the-repo were the same thing. They no longer are.)
 #
 # fix-extension is the one member that changes no bytes — it only renames. It
 # still belongs: it operates directly on the selected media file and repairs it
