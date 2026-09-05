@@ -94,6 +94,13 @@
               media-quick-actions = pkgs.callPackage ./packages/media-quick-actions.nix {
                 inherit media-toolkit media-queue;
               };
+              # In the flake, deliberately NOT in media-toolkit — see the two
+              # membership questions in packages/media-toolkit.nix. Both are
+              # opt-in in the module: fidelity-enhance pulls ~1 GB of
+              # torch/insightface on first run, and obs-fb-setup is inert until
+              # you put FB_PERSISTENT_STREAM_KEY in the login Keychain.
+              fidelity-enhance = pkgs.callPackage ./packages/fidelity-enhance.nix { };
+              obs-fb-setup = pkgs.callPackage ./packages/obs-fb-setup.nix { };
               default = media-toolkit;
             }
           );
@@ -109,6 +116,8 @@
                 "fix-media"
                 "photo-describe"
                 "media"
+                "fidelity-enhance"
+                "obs-fb-setup"
               ]
               (name: {
                 type = "app";
