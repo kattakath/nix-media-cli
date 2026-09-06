@@ -372,9 +372,16 @@ writeShellApplication {
           # library the first time this ships.
           current=$(exiftool -api requesthash=md5 -s3 -ImageDataHash "$f" 2>/dev/null || true)
           if [ -z "$stamped" ] && [ -n "$current" ]; then
-            exiftool -overwrite_original_in_place -P -q -q "-EXIF:UserComment=$stampPrefix$current;labels=" "$f" 2>/dev/null || true
+            # Report what actually happened. This used to `|| true` and then
+            # announce the stamp unconditionally, so a file that cannot take an
+            # EXIF write was told it had been stamped, every run, forever.
+            if exiftool -m -overwrite_original_in_place -P -q -q \
+                 "-EXIF:UserComment=$stampPrefix$current;labels=" "$f" 2>/dev/null; then
+              info "OK: '$f' — already described (stamped for future edit detection)"
+            else
+              info "OK: '$f' — already described (edit-detection stamp is not writable)"
+            fi
             skipped=$((skipped + 1))
-            info "OK: '$f' — already described (stamped for future edit detection)"
             continue
           fi
           if [ -z "$current" ] || [ "$stamped" = "$current" ]; then
@@ -392,7 +399,7 @@ writeShellApplication {
               [ -n "$ol" ] || continue
               retract+=("-XMP:Subject-=$ol" "-IPTC:Keywords-=$ol")
             done
-            [ ''${#retract[@]} -gt 0 ] && exiftool -overwrite_original_in_place -P -q -q \
+            [ ''${#retract[@]} -gt 0 ] && exiftool -m -overwrite_original_in_place -P -q -q \
               "''${retract[@]}" "$f" 2>/dev/null || true
           fi
         fi
@@ -530,7 +537,27 @@ writeShellApplication {
       # every photo it touches. That reorders the library by Date Modified and
       # makes every backup re-upload the whole set. In-place keeps the inode;
       # `-P` preserves the modification date. Both verified.
-      args=(-overwrite_original_in_place -P -q -q)
+      # `-m` (ignore minor errors) because a TRUNCATED EMBEDDED PREVIEW is not a
+      # reason to refuse the caption. Samsung JPEGs commonly carry a broken
+      # `OtherImageStart` pointer in IFD0; without `-m` exiftool aborts the whole
+      # write ("Error reading OtherImageStart data in IFD0", 0 files updated), so
+      # 19 of 461 photos in one measured folder silently got no description while
+      # the log blamed a write failure. Measured on those files: with `-m` the
+      # write succeeds and `ImageDataHash` is byte-identical before and after —
+      # the pixels are untouched, only the unreadable preview is dropped.
+      args=(-m -overwrite_original_in_place -P -q -q)
+      # TWO WRITES, NOT ONE — and the split IS the fix. The XMP/IPTC payload
+      # (labels, rating, caption) and the EXIF edit-detection stamp used to go in
+      # a single atomic exiftool call, so a file whose EXIF cannot be rewritten
+      # lost the CAPTION with it. Measured on a Galaxy S24 Ultra JPEG carrying a
+      # broken `OtherImageStart` pointer in IFD0: every XMP and IPTC write
+      # succeeds, every EXIF write fails, and `-m`, `-F`, `-MPF:all=` and
+      # deleting the preview first make no difference — the error is not classed
+      # minor, so nothing downgrades it. The caption had already cost a full
+      # model round-trip and was discarded at the last step. The stamp is an
+      # OPTIMIZATION (it lets a later run notice the pixels changed); the caption
+      # is the product. Never spend the second to buy the first.
+      stamp_args=()
       # APPEND, never clear. This used to clear XMP:Subject and IPTC:Keywords
       # first "so a re-describe replaces the list" — but that clear ran on the
       # DEFAULT path for every photo, so a file carrying keywords from Lightroom,
@@ -584,12 +611,28 @@ writeShellApplication {
             # never match the written `water body`, so retraction silently
             # missed every multi-word label.
             written=$(IFS=,; echo "''${human_labels[*]-}")
-            [ -n "$pixhash" ] && args+=("-EXIF:UserComment=$stampPrefix$pixhash;labels=$written")
+            [ -n "$pixhash" ] && stamp_args+=("-EXIF:UserComment=$stampPrefix$pixhash;labels=$written")
             ;;
         esac
       fi
 
-      if exiftool "''${args[@]}" "$f" 2>/dev/null; then
+      # CAPTURE exiftool's stderr, do not discard it. `2>/dev/null` made every
+      # write failure report the same generic "could not write metadata", which
+      # reads as a permissions problem and is almost never one — the real cause
+      # is a structure exiftool refuses to rewrite, and its own message names it
+      # exactly. `-q -q` already mutes everything but warnings and errors, so
+      # this captures the diagnosis and nothing else.
+      if err=$(exiftool "''${args[@]}" "$f" 2>&1); then
+        # Best-effort, and deliberately AFTER the payload landed: a stamp that
+        # cannot be written costs edit detection on this one file and nothing
+        # else. Announced rather than swallowed, because the whole reason this
+        # bug survived a folder-wide run is that a silent failure looked
+        # identical to success.
+        if [ ''${#stamp_args[@]} -gt 0 ] \
+          && ! exiftool -m -overwrite_original_in_place -P -q -q \
+               "''${stamp_args[@]}" "$f" 2>/dev/null; then
+          info "note: '$f' — caption written, edit-detection stamp is not writable"
+        fi
         described=$((described + 1))
         if [ -n "$sentence" ]; then
           info "done: '$f' — $sentence"
@@ -605,7 +648,18 @@ writeShellApplication {
           info "skip: '$f' — labelled only, no caption ($caption_gap)"
         fi
       else
-        info "error: '$f' — could not write metadata"
+        # exiftool suffixes " - <file>" to its own errors, echoing back the
+        # path AS GIVEN — and this loop passes a full path, so the suffix is the
+        # full path, not a basename. `info` already names the file, so strip
+        # exactly `$f`. Two wrong ways this was written first, both measured:
+        # `s/ - [^-]*$//` cuts at the wrong dash (half a phone library's
+        # filenames contain one, IMG-20230708-WA0220.jpg), and stripping
+        # `$(basename "$f")` never matches at all, leaving the whole path in.
+        # `"$f"` is quoted because the pattern half of `''${var%...}` is a GLOB
+        # otherwise, and a filename may legitimately contain `[` or `?`.
+        why=$(printf '%s\n' "$err" | grep -m1 '^Error' || true)
+        why=''${why% - "$f"}
+        info "error: '$f' — could not write metadata''${why:+ ($why)}"
         rc=1
       fi
     done
