@@ -519,23 +519,86 @@ writeShellApplication {
           fi
         fi
         if base64 < "$shot" | tr -d '\n' > "$tmpdir/b64" 2>/dev/null; then
-          jq -n --arg m "$model" --rawfile b "$tmpdir/b64" \
-            '{model:$m, stream:false, images:[$b],
-              options:{temperature:0, seed:42},
-              prompt:"Describe this photograph in one plain sentence under 25 words. Name the concrete things visible: how many people, what they wear or hold, the setting, and any notable objects. Prefer specific nouns over mood words. Do not begin with \"This image\" or \"The photo\"."}' \
-            > "$tmpdir/req.json" 2>/dev/null || true
-          if curl -fsS -m 180 -H 'Content-Type: application/json' \
-               -d @"$tmpdir/req.json" "$host/api/generate" > "$tmpdir/resp.json" 2>/dev/null; then
-            # `|| true`: every sibling jq here is guarded and this one was not.
-            # A 200 response whose body is not JSON (a proxy interstitial in
-            # front of a non-default OLLAMA_HOST) exits jq 5, and under
-            # `set -euo pipefail` that aborted the WHOLE batch silently — no
-            # grammar line, no summary, remaining files untouched. Unreachable
-            # against a local Ollama, whose error paths are all 4xx JSON that
-            # `curl -f` already catches, but a one-token guard against a
-            # whole-run abort is worth having regardless.
-            sentence=$(jq -r '.response // empty' "$tmpdir/resp.json" 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//' || true)
+          # ONE ASK, TWO PROMPTS, AND A BOUND. All three are measured, and none
+          # of the obvious one-line fixes work — recorded here because each was
+          # tried against this exact model and image before landing on this.
+          #
+          # THE MODEL THINKS, AND ollama RETURNS THAT SEPARATELY. Qwen3-VL emits
+          # `.thinking` alongside `.response`; only `.response` is a caption.
+          # On 12 of 461 photos in one folder the detailed prompt below sent it
+          # into deliberation it never finished, so `.response` stayed EMPTY
+          # while `.thinking` filled — and the run paid the full curl timeout,
+          # 180s each, ~36 minutes a batch, to learn nothing.
+          #
+          # THINKING EXPANDS TO FILL ANY BUDGET. Measured on one such photo,
+          # same prompt, same image, `.response` empty at every step:
+          #     num_predict  120 ->  6s, thinking  459 chars, done=length
+          #                  384 -> 33s, thinking 1281 chars, done=length
+          #                  768 -> 33s, thinking 1665 chars, done=length
+          #                 1536 -> 65s, thinking 2433 chars, done=length
+          # So a "generous enough" cap does not exist, and `"think": false` does
+          # not help either — measured, still timed out on 3/3 of those files.
+          # The cap is therefore a BOUND ON WASTE, not the cure.
+          #
+          # 1024, AND NOT LOWER. Normal photos that answer fine spend real
+          # tokens getting there — measured `eval_count` with `done=stop`: 213,
+          # 220, 455 and 746. A tidy-looking 512 would have TRUNCATED that last
+          # one, and a truncated sentence still reads like a sentence, so it
+          # would have been written to the file and never questioned. 1024 sits
+          # clear of the observed maximum.
+          #
+          # `done=length` IS NOT A CAPTION. Whatever comes back at the cap is by
+          # definition unfinished, so it is refused and retried rather than
+          # written. That is what makes the cap safe: it can re-route a photo,
+          # never degrade one.
+          #
+          # THE FALLBACK IS THE SHORT PROMPT. The elaborate ask — count people,
+          # name what they wear or hold — is what invites the deliberation;
+          # asking plainly returns in ~12s with a good sentence on exactly the
+          # photos the detailed ask never answers (measured, 3 of 3). Detailed
+          # first because its captions are better on the other 449.
+          ask() { # $1 = prompt text; sets `sentence`, `cap_gap`
+            jq -n --arg m "$model" --arg p "$1" --rawfile b "$tmpdir/b64" \
+              '{model:$m, stream:false, images:[$b], prompt:$p,
+                options:{temperature:0, seed:42, num_predict:1024}}' \
+              > "$tmpdir/req.json" 2>/dev/null || true
+            sentence=""
+            if curl -fsS -m 180 -H 'Content-Type: application/json' \
+                 -d @"$tmpdir/req.json" "$host/api/generate" > "$tmpdir/resp.json" 2>/dev/null; then
+              # `|| true`: every sibling jq here is guarded and this one was not.
+              # A 200 response whose body is not JSON (a proxy interstitial in
+              # front of a non-default OLLAMA_HOST) exits jq 5, and under
+              # `set -euo pipefail` that aborted the WHOLE batch silently — no
+              # grammar line, no summary, remaining files untouched.
+              local why
+              why=$(jq -r '.done_reason // "?"' "$tmpdir/resp.json" 2>/dev/null || true)
+              sentence=$(jq -r '.response // empty' "$tmpdir/resp.json" 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//' || true)
+              if [ "$why" = length ]; then
+                # Refused, not kept — see `done=length IS NOT A CAPTION` above.
+                sentence=""
+                cap_gap="the vision model hit the 1024-token cap still thinking, and never answered"
+              elif [ -z "$sentence" ]; then
+                cap_gap="the vision model returned an empty caption (done=$why)"
+              fi
+            else
+              # curl's own exit code, NOT a generic "returned nothing". 28 is
+              # specifically a timeout, and telling the two apart is the whole
+              # reason this folder's failure took a day to understand.
+              local rc=$?
+              if [ "$rc" = 28 ]; then
+                cap_gap="the vision model did not answer within 180s (curl timeout)"
+              else
+                cap_gap="could not reach the vision model at $host (curl exit $rc)"
+              fi
+            fi
+          }
+          cap_gap=""
+          ask "Describe this photograph in one plain sentence under 25 words. Name the concrete things visible: how many people, what they wear or hold, the setting, and any notable objects. Prefer specific nouns over mood words. Do not begin with \"This image\" or \"The photo\"."
+          if [ -z "$sentence" ]; then
+            info "note: '$f' — the detailed caption ask did not answer ($cap_gap); retrying with the plain ask"
+            ask "Describe this photograph in one plain sentence under 25 words."
           fi
+          [ -n "$sentence" ] || caption_gap="$cap_gap"
         fi
       fi
 
