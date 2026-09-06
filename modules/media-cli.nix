@@ -52,40 +52,23 @@ let
   cfg = config.programs.mediaCli;
   inherit (pkgs.stdenv.hostPlatform) isDarwin;
 
-  media-fix-extension = pkgs.callPackage ../packages/media-fix-extension.nix { };
-  media-transcode = pkgs.callPackage ../packages/media-transcode.nix { };
-  media-extract-audio = pkgs.callPackage ../packages/media-extract-audio.nix { };
-  media-fix = pkgs.callPackage ../packages/media-fix.nix {
-    inherit media-fix-extension media-transcode;
-  };
-  media-describe = pkgs.callPackage ../packages/media-describe.nix {
-    inherit media-fix-extension;
-    defaultModel = cfg.visionModel;
-  };
-  media-queue = pkgs.callPackage ../packages/media-queue.nix { inherit media-fix media-describe; };
-  media = pkgs.callPackage ../packages/media.nix {
-    inherit
-      media-fix
-      media-extract-audio
-      media-describe
-      media-queue
-      ;
-  };
-  media-toolkit = pkgs.callPackage ../packages/media-toolkit.nix {
-    inherit
-      media-transcode
-      media-extract-audio
-      media-fix-extension
-      media-fix
-      media-describe
-      media
-      ;
-  };
-  media-quick-actions = pkgs.callPackage ../packages/media-quick-actions.nix {
-    inherit media-toolkit media-queue;
-  };
-  fidelity-enhance = pkgs.callPackage ../packages/fidelity-enhance.nix { };
-  obs-fb-setup = pkgs.callPackage ../packages/obs-fb-setup.nix { };
+  # ONE graph, shared with flake.nix — see lib/packages.nix. The two knobs this
+  # module owns are threaded in HERE, which is the whole point: before the
+  # graph was shared, `visionModel` existed on this side only and `ollamaHost`
+  # had no build-time path at all, so the flake's `media-describe` and this
+  # module's were quietly different derivations.
+  inherit
+    (import ../lib/packages.nix {
+      inherit pkgs;
+      defaultModel = cfg.visionModel;
+      defaultHost = cfg.ollamaHost;
+    })
+    media-toolkit
+    media-queue
+    media-quick-actions
+    fidelity-enhance
+    obs-fb-setup
+    ;
 
   stateDir = "${config.home.homeDirectory}/Library/Application Support/nix-media-queue";
   logFile = "${config.home.homeDirectory}/${cfg.logRelPath}";
@@ -145,7 +128,19 @@ in
     ollamaHost = lib.mkOption {
       type = lib.types.str;
       default = "127.0.0.1:11434";
-      description = "Where `media-describe` looks for Ollama's HTTP API.";
+      description = ''
+        Where `media-describe` looks for Ollama's HTTP API. Threaded into the
+        package at BUILD time, like {option}`programs.mediaCli.visionModel`,
+        and NOT delivered by the `OLLAMA_HOST` session variable alone.
+
+        The session variable reaches an interactive shell; it does not reach
+        the launchd queue worker, which inherits no shell profile. Setting a
+        non-default host used to apply to `media-describe` typed at a prompt
+        and not to the same tool driven by a Finder right-click — and because
+        Ollama is a soft dependency the worker did not fail, it wrote labels
+        with no caption. `OLLAMA_HOST` is still honoured where it is set, for
+        the one-off.
+      '';
     };
 
     logRelPath = lib.mkOption {
@@ -210,10 +205,19 @@ in
     ++ lib.optional cfg.fidelityEnhance.enable fidelity-enhance
     ++ lib.optional cfg.obsFacebookSetup.enable obs-fb-setup;
 
-    # OLLAMA_HOST only. `visionModel` is threaded into media-describe at BUILD
-    # time (see its `defaultModel` argument) rather than exported here — an env
-    # var would be a third source of truth between the Nix default and `--model`,
-    # and the store path would stop telling you which model actually ran.
+    # BOTH knobs are threaded into media-describe at BUILD time (see its
+    # `defaultModel`/`defaultHost` arguments). An env var alone cannot deliver
+    # either: it would be a third source of truth between the Nix default and
+    # `--model`, the store path would stop telling you which model actually ran,
+    # and — the part that made this a real bug rather than a purity argument —
+    # a launchd agent inherits no shell profile, so a session variable reaches
+    # the interactive CLI and NOT the queue worker.
+    #
+    # This is still exported, for a different consumer: `OLLAMA_HOST` is
+    # Ollama's OWN variable, so it is what points the `ollama` CLI (and any
+    # other client the operator runs) at the same endpoint. media-describe
+    # honours it too, which keeps `OLLAMA_HOST=... media-describe ...` working
+    # as a one-off override.
     home.sessionVariables.OLLAMA_HOST = cfg.ollamaHost;
 
     # COPIED, not symlinked — and the reason is a MIGRATION WALL, not removal.

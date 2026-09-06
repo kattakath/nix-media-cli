@@ -170,6 +170,18 @@
   # from the derivation. A fork or the home-manager option sets this; an
   # operator uses --model.
   defaultModel ? "huihui_ai/qwen3-vl-abliterated",
+  # The Ollama endpoint, build-time for the SAME reason as defaultModel above —
+  # and here it is not a style choice, it is the only delivery that works.
+  # `OLLAMA_HOST` reaches an interactive shell through
+  # `home.sessionVariables`; it does NOT reach the launchd queue worker, which
+  # inherits no shell profile and whose plist carries no `EnvironmentVariables`.
+  # So an env-only host silently applied to `media-describe` typed at a prompt
+  # and NOT to the same tool driven by a Finder right-click — and because
+  # Ollama is a soft dependency, the worker did not fail, it wrote labels with
+  # no caption and reported "no ollama at ...". Baking the default in makes the
+  # two paths agree by construction. `OLLAMA_HOST` still wins where it is set,
+  # for the one-off.
+  defaultHost ? "http://127.0.0.1:11434",
 }:
 writeShellApplication {
   name = "media-describe";
@@ -217,7 +229,13 @@ writeShellApplication {
     # photos that most need a description to be findable — they got labels and
     # no sentence, with nothing in the output saying why.
     min_score=""
-    host="''${OLLAMA_HOST:-http://127.0.0.1:11434}"
+    # Assigned to its own variable first, NOT inlined as
+    # `''${OLLAMA_HOST:-${"\${lib.escapeShellArg defaultHost}"}}`: escapeShellArg
+    # emits single quotes, and inside a double-quoted `''${var:-word}` those
+    # quotes are literal — the fallback host would arrive as `'http://...'`,
+    # quotes and all, and every curl would fail on a URL nobody can see is wrong.
+    default_host=${lib.escapeShellArg defaultHost}
+    host="''${OLLAMA_HOST:-$default_host}"
     # Bare host:port is a legal OLLAMA_HOST; curl needs a scheme.
     case "$host" in http://*|https://*) ;; *) host="http://$host" ;; esac
 

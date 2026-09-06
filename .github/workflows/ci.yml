@@ -24,7 +24,14 @@ jobs:
           name: kattakath
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - name: Formatting
-        run: nix run nixpkgs#nixfmt-rfc-style -- --check $(find . -name '*.nix')
+        # THE FLAKE'S OWN formatter, not a second one named here. This step used
+        # to be `nix run nixpkgs#nixfmt-rfc-style -- --check $(find ...)`, which
+        # is a separate source of truth from `formatter` in flake.nix — and it
+        # hid the fact that `nix fmt` itself was broken for this repo (nixfmt
+        # 1.4.0 cannot take the directory `nix fmt` hands it). CI stayed green
+        # on files a contributor could not format locally, then failed on the
+        # one they forgot. `--ci` is treefmt's own fail-on-change mode.
+        run: nix fmt -- --ci
       - name: Flake outputs well-formed
         run: nix flake show
       - name: Build CLIs + module eval check
