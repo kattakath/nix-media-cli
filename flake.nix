@@ -25,9 +25,9 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       # The formatter runs on all three; every package here is macOS-only and
       # gated per-system below. This is NOT the usual "shell scripts are
-      # portable" case — measured, only extract-audio is: fix-extension calls
-      # /usr/bin/mdls and BSD `stat -f`, fix-google-video adds /usr/bin/SetFile
-      # and moves originals to ~/.Trash, photo-describe shells out to
+      # portable" case — measured, only media-extract-audio is: media-fix-extension calls
+      # /usr/bin/mdls and BSD `stat -f`, media-transcode adds /usr/bin/SetFile
+      # and moves originals to ~/.Trash, media-describe shells out to
       # /usr/bin/sips and `auge` (Apple's Vision framework), media-quick-actions
       # emits Automator bundles, and media-queue is launchd end to end.
       systems = [
@@ -50,43 +50,45 @@
             let
               # Named so siblings can be threaded in explicitly rather than
               # re-instantiated: callPackage's defaults would otherwise build a
-              # SECOND fix-extension for fix-media and a third for
-              # photo-describe, and the three could drift.
-              fix-extension = pkgs.callPackage ./packages/fix-extension.nix { };
-              fix-google-video = pkgs.callPackage ./packages/fix-google-video.nix { };
-              extract-audio = pkgs.callPackage ./packages/extract-audio.nix { };
-              fix-media = pkgs.callPackage ./packages/fix-media.nix { inherit fix-extension fix-google-video; };
-              photo-describe = pkgs.callPackage ./packages/photo-describe.nix { inherit fix-extension; };
+              # SECOND media-fix-extension for media-fix and a third for
+              # media-describe, and the three could drift.
+              media-fix-extension = pkgs.callPackage ./packages/media-fix-extension.nix { };
+              media-transcode = pkgs.callPackage ./packages/media-transcode.nix { };
+              media-extract-audio = pkgs.callPackage ./packages/media-extract-audio.nix { };
+              media-fix = pkgs.callPackage ./packages/media-fix.nix {
+                inherit media-fix-extension media-transcode;
+              };
+              media-describe = pkgs.callPackage ./packages/media-describe.nix { inherit media-fix-extension; };
               # media-queue takes the two CLIs its worker dispatches to, NOT the
               # media-toolkit bundle — that bundle contains `media`, and `media`
               # has a `queue` verb, so the bundle would close an eval cycle.
-              media-queue = pkgs.callPackage ./packages/media-queue.nix { inherit fix-media photo-describe; };
+              media-queue = pkgs.callPackage ./packages/media-queue.nix { inherit media-fix media-describe; };
               media = pkgs.callPackage ./packages/media.nix {
                 inherit
-                  fix-media
-                  extract-audio
-                  photo-describe
+                  media-fix
+                  media-extract-audio
+                  media-describe
                   media-queue
                   ;
               };
               media-toolkit = pkgs.callPackage ./packages/media-toolkit.nix {
                 inherit
-                  fix-google-video
-                  extract-audio
-                  fix-extension
-                  fix-media
-                  photo-describe
+                  media-transcode
+                  media-extract-audio
+                  media-fix-extension
+                  media-fix
+                  media-describe
                   media
                   ;
               };
             in
             {
               inherit
-                fix-extension
-                fix-google-video
-                extract-audio
-                fix-media
-                photo-describe
+                media-fix-extension
+                media-transcode
+                media-extract-audio
+                media-fix
+                media-describe
                 media-queue
                 media
                 media-toolkit
@@ -110,11 +112,11 @@
           apps = pkgs.lib.optionalAttrs (system == "aarch64-darwin") (
             pkgs.lib.genAttrs
               [
-                "fix-extension"
-                "fix-google-video"
-                "extract-audio"
-                "fix-media"
-                "photo-describe"
+                "media-fix-extension"
+                "media-transcode"
+                "media-extract-audio"
+                "media-fix"
+                "media-describe"
                 "media"
                 "fidelity-enhance"
                 "obs-fb-setup"

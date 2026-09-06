@@ -1,6 +1,6 @@
-# fix-extension — rename files whose EXTENSION lies about their CONTENT.
+# media-fix-extension — rename files whose EXTENSION lies about their CONTENT.
 #
-#   fix-extension [--dry-run] [--only image|video|audio] [--print0] <file-or-dir>...
+#   media-fix-extension [--dry-run] [--only image|video|audio] [--print0] <file-or-dir>...
 #
 # Why this exists: Finder's thumbnail generator trusts the extension → UTI, so
 # a JPEG named `.png` is handed to the PNG decoder, which rejects it, and the
@@ -47,7 +47,7 @@
 #                incomplete, so any verdict drawn from them is wrong.
 #   AppleDouble — `._name` resource-fork siblings, which are metadata, not media.
 #
-# `--only` and `--print0` exist for ONE caller, fix-media, and are what let it
+# `--only` and `--print0` exist for ONE caller, media-fix, and are what let it
 # compose this with a repair step instead of reimplementing the sniffing:
 #
 #   --only  restricts the run to one media class, so "fix the videos in this
@@ -69,7 +69,7 @@
   findutils,
 }:
 writeShellApplication {
-  name = "fix-extension";
+  name = "media-fix-extension";
   # `mdls` and BSD `stat` are called by ABSOLUTE /usr/bin path, not left to PATH:
   # coreutils below shadows `stat`, and GNU stat reads `-f` as "filesystem
   # status" rather than a format string — the dataless guard would have been
@@ -80,7 +80,7 @@ writeShellApplication {
     findutils
   ];
   text = ''
-    prog=fix-extension
+    prog=media-fix-extension
     usage="usage: $prog [--dry-run] [--only image|video|audio] [--print0] <file-or-directory>..."
     die() { echo "$prog: error: $*" >&2; exit 1; }
     info() { echo "$prog: $*" >&2; }
@@ -320,7 +320,7 @@ writeShellApplication {
     # matches the STARTING directory too — and `*` matches empty, so it matches a
     # bare `.` as well. Without it:
     #   - pass two printed $root itself, and `walk "$d"` then re-entered the same
-    #     directory forever. `fix-media --image .`, or any dotted folder such as
+    #     directory forever. `media-fix --image .`, or any dotted folder such as
     #     `Trip 2019.raw`, hung outright — and under the media-queue worker that
     #     is a PERMANENT wedge, because the job holds the queue lock while it
     #     spins, so nothing else ever drains.

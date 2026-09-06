@@ -7,9 +7,9 @@
 #
 # macOS-ONLY: everything below is gated on stdenv.isDarwin, so enabling it on a
 # Linux host is a clean no-op (safe for a mixed nix-darwin + NixOS fleet). That
-# gate is real, not defensive: only extract-audio is portable — fix-extension
-# calls /usr/bin/mdls and BSD `stat -f`, fix-google-video adds /usr/bin/SetFile
-# and ~/.Trash, photo-describe shells out to /usr/bin/sips and Apple's Vision
+# gate is real, not defensive: only media-extract-audio is portable — media-fix-extension
+# calls /usr/bin/mdls and BSD `stat -f`, media-transcode adds /usr/bin/SetFile
+# and ~/.Trash, media-describe shells out to /usr/bin/sips and Apple's Vision
 # framework, the Services are Automator bundles, and the queue is launchd.
 #
 # EVERY QUEUE MECHANISM IS launchd's, NOT OURS:
@@ -52,30 +52,32 @@ let
   cfg = config.programs.mediaCli;
   inherit (pkgs.stdenv.hostPlatform) isDarwin;
 
-  fix-extension = pkgs.callPackage ../packages/fix-extension.nix { };
-  fix-google-video = pkgs.callPackage ../packages/fix-google-video.nix { };
-  extract-audio = pkgs.callPackage ../packages/extract-audio.nix { };
-  fix-media = pkgs.callPackage ../packages/fix-media.nix { inherit fix-extension fix-google-video; };
-  photo-describe = pkgs.callPackage ../packages/photo-describe.nix {
-    inherit fix-extension;
+  media-fix-extension = pkgs.callPackage ../packages/media-fix-extension.nix { };
+  media-transcode = pkgs.callPackage ../packages/media-transcode.nix { };
+  media-extract-audio = pkgs.callPackage ../packages/media-extract-audio.nix { };
+  media-fix = pkgs.callPackage ../packages/media-fix.nix {
+    inherit media-fix-extension media-transcode;
+  };
+  media-describe = pkgs.callPackage ../packages/media-describe.nix {
+    inherit media-fix-extension;
     defaultModel = cfg.visionModel;
   };
-  media-queue = pkgs.callPackage ../packages/media-queue.nix { inherit fix-media photo-describe; };
+  media-queue = pkgs.callPackage ../packages/media-queue.nix { inherit media-fix media-describe; };
   media = pkgs.callPackage ../packages/media.nix {
     inherit
-      fix-media
-      extract-audio
-      photo-describe
+      media-fix
+      media-extract-audio
+      media-describe
       media-queue
       ;
   };
   media-toolkit = pkgs.callPackage ../packages/media-toolkit.nix {
     inherit
-      fix-google-video
-      extract-audio
-      fix-extension
-      fix-media
-      photo-describe
+      media-transcode
+      media-extract-audio
+      media-fix-extension
+      media-fix
+      media-describe
       media
       ;
   };
@@ -132,7 +134,7 @@ in
       default = "huihui_ai/qwen3-vl-abliterated";
       example = "qwen2.5vl:7b";
       description = ''
-        The Ollama vision model `photo-describe` asks for a caption, when no
+        The Ollama vision model `media-describe` asks for a caption, when no
         `--model` is given. Ollama is a SOFT dependency: with it absent or the
         model unpulled, a run still writes Vision labels and a rating and says
         so, rather than failing and leaving a library half-tagged.
@@ -142,7 +144,7 @@ in
     ollamaHost = lib.mkOption {
       type = lib.types.str;
       default = "127.0.0.1:11434";
-      description = "Where `photo-describe` looks for Ollama's HTTP API.";
+      description = "Where `media-describe` looks for Ollama's HTTP API.";
     };
 
     logRelPath = lib.mkOption {
@@ -187,7 +189,7 @@ in
       defaultText = lib.literalExpression "with pkgs; [ exiftool ]";
       description = ''
         Companion tools installed alongside the CLIs. `exiftool` is the default
-        because it is the metadata writer `photo-describe` shells out to and the
+        because it is the metadata writer `media-describe` shells out to and the
         only tool that reads or writes the full EXIF/IPTC/XMP surface — `mdls`
         shows only Spotlight's lossy derived view and `sips` has no EXIF tag
         access at all.
@@ -207,7 +209,7 @@ in
     ++ lib.optional cfg.fidelityEnhance.enable fidelity-enhance
     ++ lib.optional cfg.obsFacebookSetup.enable obs-fb-setup;
 
-    # OLLAMA_HOST only. `visionModel` is threaded into photo-describe at BUILD
+    # OLLAMA_HOST only. `visionModel` is threaded into media-describe at BUILD
     # time (see its `defaultModel` argument) rather than exported here — an env
     # var would be a third source of truth between the Nix default and `--model`,
     # and the store path would stop telling you which model actually ran.

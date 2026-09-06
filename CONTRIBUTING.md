@@ -9,7 +9,7 @@ most welcome.
 nix flake check -L                        # build every CLI (shellcheck) + module eval
 nix run nixpkgs#nixfmt-rfc-style -- .     # format all .nix (CI enforces this)
 nix build .#media-toolkit                 # the bundle everything else composes
-nix run .#photo-describe -- --help
+nix run .#media-describe -- --help
 ```
 
 ## Guidelines
@@ -22,7 +22,7 @@ nix run .#photo-describe -- --help
   `media-worker` counts `done:` lines and lifts the first `skip:`/`OK:` as the
   reason a batch changed nothing, so a CLI that invents its own vocabulary
   silently reports "0 done" forever.
-- **Never rewrite pixels to fix metadata.** `fix-extension` renames; it does not
+- **Never rewrite pixels to fix metadata.** `media-fix-extension` renames; it does not
   re-encode. A second lossy generation to correct a filename is a bad trade.
 - **Comments explain WHY, and cite the measurement.** Most of the non-obvious
   code here exists because something was measured — `auge --all` being 30x
