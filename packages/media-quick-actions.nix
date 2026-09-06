@@ -11,9 +11,10 @@
 # Contents/Info.plist (what the menu item is called, and which file types it
 # attaches to) and Contents/document.wflow (what it runs). Nothing needs
 # Automator.app to author it, so both are generated here with
-# `lib.generators.toPlist` and the bundle is linked into ~/Library/Services by
-# home.nix. Verified: macOS registers a bundle reached through a SYMLINK, so
-# the home.file/store-path model works — no copy-into-place needed.
+# `lib.generators.toPlist`; modules/media-cli.nix puts the bundle into
+# ~/Library/Services. Verified: macOS registers a bundle reached through a
+# SYMLINK, so nothing about macOS forces the copy-into-place the module does
+# today — read the cited note at that activation script for what does.
 #
 # Two details that are load-bearing and non-obvious:
 #

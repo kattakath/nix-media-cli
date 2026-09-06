@@ -124,8 +124,9 @@ in
       description = ''
         Install the Finder right-click Services into ~/Library/Services.
 
-        They are COPIED, not symlinked, and the copy is what makes them
-        removable: set this false and the next activation deletes them.
+        They are COPIED, not symlinked; set this false and the next
+        activation deletes them. The copy is NOT what makes that removal
+        work — see the cited note on the activation script below.
       '';
     };
 
@@ -215,9 +216,37 @@ in
     # and the store path would stop telling you which model actually ran.
     home.sessionVariables.OLLAMA_HOST = cfg.ollamaHost;
 
-    # COPIED, not symlinked. macOS does register a bundle reached through a
-    # symlink, but a copy is what lets `installQuickActions = false` actually
-    # remove them: home.file would only unlink what it still knows about.
+    # COPIED, not symlinked — and the reason is a MIGRATION WALL, not removal.
+    #
+    # The removal reason this comment used to give ("home.file would only
+    # unlink what it still knows about") is FALSE. Grepped pinned home-manager
+    # (a49f50d) modules/files.nix for cleanOldGen/rmdir: `cleanOldGen` (:354)
+    # walks the OLD generation's leaves and hands each to `cleanup` (:307),
+    # which `rm`s every target the new generation no longer has (:324) and
+    # `rmdir -p`s the emptied parents (:334). That IS the
+    # `installQuickActions = false` case, and upstream already does it right.
+    #
+    # What actually blocks `home.file` TODAY: these bundles are real
+    # DIRECTORIES on every machine that has run this module. home-manager's
+    # checkLinkTargets pre-flight (files.nix:142 → files/check-link-targets.sh)
+    # records "would be clobbered" and exits 1 BEFORE writeBoundary; with
+    # `force = true` the check is skipped but the slow path's `ln -Tsf`
+    # (files.nix:302) then fails on the directory and exits 1 anyway. A blind
+    # swap therefore aborts activation mid-run on a live Mac. It needs a
+    # one-time migration step, not an option change.
+    #
+    # The chmod below is a CONSEQUENCE of copying, not a second reason for it.
+    # Measured here: `cp -RL` preserves the store's 0555/0444, and inside a
+    # 0555 bundle both creating and unlinking an entry return EACCES — so the
+    # `rm -rf` above would fail on the NEXT activation without it.
+    #
+    # NOT established, and deliberately not claimed: that macOS itself needs
+    # the bundle writable. Nothing has ever written into these bundles (checked
+    # on this machine: still only the two generated plists, install mtimes
+    # intact), and macOS registers a bundle reached through a symlink (see the
+    # header of packages/media-quick-actions.nix). So the copy has no known
+    # permanent justification beyond the migration wall — an open question,
+    # left open rather than backfilled with a plausible-sounding one.
     home.activation.mediaCliQuickActions = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       svc="${config.home.homeDirectory}/Library/Services"
       run mkdir -p "$svc"
