@@ -44,7 +44,21 @@
       perSystem =
         { pkgs, system, ... }:
         {
-          formatter = pkgs.nixfmt-rfc-style;
+          # `nixfmt-tree`, NOT bare `nixfmt-rfc-style`. `nix fmt` invokes the
+          # formatter with the directory to format, and nixfmt 1.4.0 deprecated
+          # directory arguments — it prints "Passing directories or non-Nix
+          # files (such as \".\") is deprecated ... use the `pkgs.nixfmt-tree`
+          # wrapper instead" and then FAILS to parse, so `nix fmt` errored and
+          # formatted nothing. Silently, in practice: the failure is a parse
+          # error on stderr, and a repo whose CI checks formatting with its own
+          # separate `nix run nixpkgs#nixfmt-rfc-style` invocation never noticed
+          # that its `nix fmt` had never worked. Measured by shipping an
+          # unformatted flake.nix past a green local `nix fmt`.
+          #
+          # `nixfmt-tree` is nixfmt's OWN recommended wrapper, already in
+          # nixpkgs — a treefmt harness that walks the tree. No new input, no
+          # hand-rolled find-and-pipe.
+          formatter = pkgs.nixfmt-tree;
 
           # ONE graph, shared with modules/media-cli.nix — see lib/packages.nix
           # for why a second copy here is where an option goes to die.
@@ -146,8 +160,12 @@
               # sandbox question about whether a runtime reference is present.
               host-reaches-worker =
                 let
-                  a = workerArg0 (mkHm { programs.mediaCli.ollamaHost = "127.0.0.1:11434"; });
-                  b = workerArg0 (mkHm { programs.mediaCli.ollamaHost = "sentinel.invalid:65000"; });
+                  a = workerArg0 (mkHm {
+                    programs.mediaCli.ollamaHost = "127.0.0.1:11434";
+                  });
+                  b = workerArg0 (mkHm {
+                    programs.mediaCli.ollamaHost = "sentinel.invalid:65000";
+                  });
                 in
                 pkgs.runCommand "media-cli-host-reaches-worker" { } ''
                   test "${a}" != "${b}" || {
