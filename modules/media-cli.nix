@@ -5,7 +5,7 @@
 # Turn it off and every one of those disappears together — no orphaned package,
 # no dangling session variable, no stale menu item.
 #
-# macOS-ONLY: everything below is gated on stdenv.isDarwin, so enabling it on a
+# macOS-ONLY: everything below is gated on stdenv.hostPlatform.isDarwin, so enabling it on a
 # Linux host is a clean no-op (safe for a mixed nix-darwin + NixOS fleet). That
 # gate is real, not defensive: only media-extract-audio is portable — media-fix-extension
 # calls /usr/bin/mdls and BSD `stat -f`, media-transcode adds /usr/bin/SetFile
