@@ -3,6 +3,7 @@
 #   media describe [...]   write what an image IS into the image
 #   media fix [...]        repair a media file by class
 #   media audio [...]      pull the audio track out of a video
+#   media enqueue [...]    hand that same work to the background queue instead
 #   media queue [...]      inspect and control the background work queue
 #
 # WHY THIS EXISTS: discoverability, not ergonomics. The five media CLIs are
@@ -18,14 +19,37 @@
 # own notes are written in the direct form. A dispatcher that REPLACED them
 # would be a breaking change bought for a shorter help listing.
 #
-# THE LINE THE `queue` VERB DRAWS: `media` is what a HUMAN types; the bare
-# names are what MACHINES call. media-queue-status/-top/-pause/-resume are the
-# four queue tools an operator runs by hand, and nothing hardcodes them — no
-# Finder .workflow, no launchd arg0, no flake app, no composition seam — so
-# they belong behind the dispatcher for the same discoverability reason the
-# other three verbs do. The rest of the queue stays out for the concrete
-# reasons below, which are about breakage, not taste. Before this verb existed
-# the split was accidental: these four simply postdated this file's header.
+# THE LINE THE DISPATCHER DRAWS: `media` is what a HUMAN types; the bare names
+# are what MACHINES call. Every tool an operator runs BY HAND belongs behind the
+# dispatcher — media-enqueue, media-queue-status, media-queue-top,
+# media-queue-pause, media-queue-resume. The rest stays out for the concrete
+# reasons below, which are about breakage, not taste.
+#
+# THIS PARAGRAPH USED TO STATE A DIFFERENT CRITERION, and it was wrong: it said
+# those tools belong here because "nothing hardcodes them — no Finder .workflow,
+# no launchd arg0, no flake app, no composition seam". That is a fact about the
+# CALLERS, not a membership rule, and reading it as one is what kept
+# media-enqueue out. A verb is ADDITIVE: the binary keeps its name, so every
+# hardcoded caller is untouched by definition. media-queue-status is the proof
+# it was never the real rule — it is reachable as `media queue` AND under its
+# own name, and always has been. The genuine exclusions below turn on breakage
+# (an arg0 that must stay `nix-media-queue` for TCC, a composition seam not
+# meant for hand use), never on who happens to call a tool today.
+#
+# RETRACTED 2026-09-06 — `enqueue` IS a verb. This file used to exclude it in
+# one line, "the Finder Services call it by absolute store path". That is true
+# (packages/media-quick-actions.nix:73, 85, 100) and it argues about the
+# BINARY's NAME, which the ADDITIVE rule above already settles for all of
+# these: a verb ADDS a name and removes none, so no store-path caller can tell
+# the difference. The HUMAN-types/MACHINES-call line above partitions CALLERS,
+# not verbs — one name serves both, which is what "purely additive" means.
+# media-worker directly below is what a REAL exclusion looks like: there the
+# dispatcher REPLACES the arg0 launchd execs and the TCC grant dies with it.
+# The confusion had a concrete cost: `media-describe <dir>` and the Describe
+# Image(s) Quick Action run the same work through the same binary
+# (packages/media-queue.nix:782), and only the Quick Action's copy ever
+# appeared in `media queue` — a shell-started pass could not be put into the
+# list the operator was already watching, pausing and resuming.
 #
 # WHAT IS DELIBERATELY NOT A VERB, and why each one would break if it were:
 #
@@ -36,7 +60,6 @@
 #                     Behind a dispatcher the arg0 becomes `media`, and it
 #                     silently loses that access: it would run, log nothing
 #                     useful, and quietly do no work.
-#   media-enqueue     the Finder Services call it by absolute store path.
 #   media-queue-power-monitor
 #                     launchd StartInterval only; it is a tick, not a command,
 #                     and `media queue power-monitor` would invite running it
@@ -83,15 +106,27 @@ writeShellApplication {
                                             lying extension, re-encodes an
                                             editor-hostile codec
       audio     [--mp3|--wav|--flac] <file> pull the audio track out of a video
-      queue     [top|pause|resume]          the background work queue behind the
-                                            Finder Services: bare prints a
-                                            one-shot status, `top` follows it
-                                            live, pause/resume freeze and thaw
-                                            the in-flight job
+      enqueue   <--video|--image|--describe> [--priority high|normal|low] <path>...
+                                            the same describe/fix work, handed
+                                            to the background queue instead of
+                                            run here — returns at once
+      queue     [status|top|pause|resume]   inspect and control that queue: bare
+                                            or `status` is a one-shot read,
+                                            `top` follows it live, pause/resume
+                                            freeze and thaw the in-flight job
+
+    TWO WAYS TO RUN THE WORK. `media describe|fix` runs it HERE: you watch it,
+    you get its exit status, and closing the terminal or logging out kills it.
+    `media enqueue --describe|--video|--image` hands the identical job to
+    launchd: it returns immediately, runs throttled in the background, survives
+    logout, and is the only path that shows up in `media queue`. The Finder
+    Quick Actions enqueue for exactly that reason. (`audio` has no queue class:
+    one track is seconds, so a round trip through launchd would buy nothing.)
 
     Each command takes --help of its own. The underlying CLIs remain on PATH
     under their own names (media-describe, media-fix, media-extract-audio,
-    media-queue-status, media-queue-top, media-queue-pause, media-queue-resume).
+    media-enqueue, media-queue-status, media-queue-top, media-queue-pause,
+    media-queue-resume).
     EOF
     }
 
@@ -125,13 +160,18 @@ writeShellApplication {
       describe) shift; exec media-describe "$@" ;;
       fix)      shift; exec media-fix "$@" ;;
       audio)    shift; exec media-extract-audio "$@" ;;
+      # `exec` like the three above rather than a function like `queue`:
+      # media-enqueue is one binary with no sub-verb to route, so a frame
+      # between the caller and its exit status would buy nothing. It is
+      # already on PATH via the media-queue symlinkJoin in runtimeInputs.
+      enqueue)  shift; exec media-enqueue "$@" ;;
       queue)    shift; queue "$@" ;;
       -h|--help|help|"") usage; [ $# -eq 0 ] && exit 1; exit 0 ;;
       *) echo "media: error: unknown command '$1'" >&2; usage; exit 1 ;;
     esac
   '';
   meta = {
-    description = "One entry point for the media CLIs: media describe / fix / audio / queue";
+    description = "One entry point for the media CLIs: media describe / fix / audio / enqueue / queue";
     mainProgram = "media";
   };
 }

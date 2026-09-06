@@ -31,14 +31,14 @@ the cheap, regenerable one is left to a tool like [`rclip`](https://github.com/y
 
 | Command | What it does |
 |---|---|
-| `media` | one entry point — `describe`, `fix`, `audio`, `queue` |
+| `media` | one entry point — `describe`, `fix`, `audio`, `enqueue`, `queue` |
 | `media-describe` | Vision labels + rating + a local-VLM caption → the image's own XMP |
 | `media-fix --video\|--image` | repair by media CLASS; decides what is actually wrong |
 | `media-fix-extension` | rename files whose extension lies about their content |
 | `media-transcode` | re-encode editor-hostile codecs (VP9-in-MP4, AV1) to H.264+AAC |
 | `media-extract-audio` | pull the audio track out of a video |
-| `media-enqueue` | hand work to the queue and return at once |
-| `media queue [top\|pause\|resume]` | inspect and control the queue |
+| `media enqueue` / `media-enqueue` | hand the same work to the queue and return at once |
+| `media queue [status\|top\|pause\|resume]` | inspect and control the queue |
 
 Every one takes `--help`. All of them stay on `PATH` under their own names;
 `media` is additive, never a replacement.
