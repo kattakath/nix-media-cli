@@ -54,7 +54,7 @@
 # loop below, the stranded-retry reclaim, and `cleanup()`'s own
 # requeue-on-interrupt — used to put the job straight back in `queue`,
 # where it competed evenly with a brand new request. MEASURED, 2026-09-05:
-# a handful of `activate` runs on this Mac left 6 duplicate `photo-describe`
+# a handful of `activate` runs on this Mac left 6 duplicate `media-describe`
 # passes over the same folder, each one system-generated noise a fresh
 # Finder click would have queued behind. Those three recovery sites now
 # demote to `queue-low` UNCONDITIONALLY; a normal failing-job retry
@@ -79,7 +79,7 @@
 # `-$pid`, NEVER bare `$pid`. `setsid` in media-worker gives the backgrounded
 # job its own SESSION, which is by construction also its own process group
 # (pgid == its own pid) — specifically so the existing `kill -TERM -"$child"`
-# in the SIGTERM path can reach grandchildren like fix-google-video's ffmpeg.
+# in the SIGTERM path can reach grandchildren like media-transcode's ffmpeg.
 # The negative pid is what makes a signal hit the whole group instead of only
 # the immediate child; pause/resume reuse that same convention so a stop
 # actually freezes exiftool/curl/ffmpeg too, not just the shell driving them.
@@ -126,10 +126,10 @@
   #      evaluation CYCLE (media -> media-queue -> media-toolkit -> media).
   #      Naming the two leaves breaks it; neither depends on `media`.
   #   2. It was always over-broad. The dispatch below only ever calls these
-  #      two, and fix-media brings fix-extension/fix-google-video along in its
+  #      two, and media-fix brings media-fix-extension/media-transcode along in its
   #      own runtimeInputs, so nothing is lost.
-  fix-media ? callPackage ./fix-media.nix { },
-  photo-describe ? callPackage ./photo-describe.nix { },
+  media-fix ? callPackage ./media-fix.nix { },
+  media-describe ? callPackage ./media-describe.nix { },
 }:
 let
   # Spliced into all three, so the layout is stated once. INLINED rather than
@@ -379,8 +379,8 @@ symlinkJoin {
       runtimeInputs = [
         coreutils
         findutils
-        fix-media
-        photo-describe
+        media-fix
+        media-describe
         util-linuxMinimal
       ];
       text = ''
@@ -437,7 +437,7 @@ symlinkJoin {
         # file (see `printf ... > "$running"` right after `child=$!`
         # below), a dead owner might still have a perfectly healthy,
         # paused job sitting behind it — MEASURED: this exact situation
-        # produced 7 duplicate `photo-describe` passes over one folder in
+        # produced 7 duplicate `media-describe` passes over one folder in
         # a single evening, each `activate` adding one more, because the
         # old code could only ever discard and restart. Adopt at most ONE
         # per worker start (this worker can only run one job at a time
@@ -530,11 +530,11 @@ symlinkJoin {
               # Kill the encode FIRST. Without this the trap would not even run until
               # ffmpeg finished on its own, and launchd escalates SIGTERM to SIGKILL
               # long before a two-hour batch is done.
-              # The whole PROCESS GROUP, not just the child: fix-media's own ffmpeg is
+              # The whole PROCESS GROUP, not just the child: media-fix's own ffmpeg is
               # a GRANDchild, and killing only the middle process orphans an encode
               # that keeps burning CPU and leaves its temp file behind. `setsid`
               # below puts each job in its own session/group so the negative pid
-              # reaches all of it — including fix-google-video, whose trap then removes the
+              # reaches all of it — including media-transcode, whose trap then removes the
               # partial encode.
               [ -n "$child" ] && kill -TERM -"$child" 2>/dev/null || true
               # An interrupted RUNNING job goes BACK to a queue rather than
@@ -774,13 +774,13 @@ symlinkJoin {
           # control is off — so `setsid` execs directly; `$!` is the job's
           # own real pid, not a forked wrapper's.)
           #
-          # Dispatch by class rather than always calling fix-media: `describe`
+          # Dispatch by class rather than always calling media-fix: `describe`
           # is an ENRICHMENT, not a repair, so it has its own CLI. Both speak
           # the same done:/skip:/OK: grammar, so everything downstream — the
           # counters, the reason extraction, the notification — is unchanged.
           case "$class" in
-            describe) setsid photo-describe "$path" > "$scratch" 2>&1 & ;;
-            *)        setsid fix-media "--$class" "$path" > "$scratch" 2>&1 & ;;
+            describe) setsid media-describe "$path" > "$scratch" 2>&1 & ;;
+            *)        setsid media-fix "--$class" "$path" > "$scratch" 2>&1 & ;;
           esac
           child=$!
           # RECORD THE JOB'S REAL PID IN ITS OWN MARKER — the standard

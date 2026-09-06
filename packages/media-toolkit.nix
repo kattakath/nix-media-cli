@@ -1,22 +1,53 @@
 # media-toolkit — the fleet's local media-file CLIs, as one installable unit.
 #
-#   fix-google-video <file>...                    re-encode editor-hostile video
-#   extract-audio [--mp3|--wav|--flac] <file>...  pull out the audio track
-#   fix-extension <file-or-dir>...                rename a file whose extension
-#                                                 lies about its content
-#   fix-media <--video|--image> <file-or-dir>...  repair a media file by CLASS,
-#                                                 deciding which of the above
-#                                                 it actually needs
-#   media <describe|fix|audio> ...                one entry point for the below
-#   photo-describe <file-or-dir>...               write what an image IS into
-#                                                 the image (XMP description +
-#                                                 keywords + rating)
+#   media <describe|fix|audio|queue> ...   one entry point for everything below
+#   media-describe <file-or-dir>...        write what an image IS into the image
+#                                          (XMP description + keywords + rating)
+#   media-fix <--video|--image> <path>...  repair a media file by CLASS, deciding
+#                                          which of the below it actually needs
+#   media-fix-extension <file-or-dir>...   rename a file whose extension lies
+#                                          about its content
+#   media-transcode <file>...              re-encode editor-hostile video
+#   media-extract-audio [--mp3|…] <file>…  pull out the audio track
+#
+# THE NAMING SCHEME: one domain prefix, verb first, flat. `media` is the domain
+# word and stays bare, because a dispatcher named for its domain is the standard
+# shape (git, nix, docker). Everything else is `media-<verb>`.
+#
+# Matches this fleet's own precedent rather than a generic convention:
+# kattakath/nix-vast-provision settled on flat `vast-<verb>` — vast-rent,
+# vast-repo-check, vast-account-vars-set — with no dispatcher layer. This is that
+# scheme plus the umbrella it had already grown.
+#
+# Renamed 2026-09-05, from three clashing schemes that had accreted from
+# different directions: a `fix-*` prefix (fix-media, fix-extension,
+# fix-google-video), bare nouns (photo-describe, extract-audio), and the
+# `media-queue-*` family. Two of those names were actively wrong, not merely
+# inconsistent:
+#
+#   fix-google-video -> media-transcode
+#     Named for a SYMPTOM and, worse, for one vendor. Its codec allowlist is
+#     h264|hevc|prores|mpeg4|mjpeg — it re-encodes ANY editor-hostile codec
+#     (VP9, AV1), and nothing in the script is Google-specific. The Google
+#     Photos Takeout story is real and stays in that file's header, where a
+#     motivating anecdote belongs; it has no business in a permanent CLI name.
+#
+#   photo-describe -> media-describe
+#     A fourth prefix owned by a single tool, and inaccurate besides: it handles
+#     screenshots and receipts too (Apple's aesthetics pass returns an
+#     is_utility flag precisely so it can skip captioning those).
+#
+# The cost was real and was accepted deliberately: the machine cost is nil (the
+# Finder .workflow bundles are generated from these derivations and follow a
+# rename automatically), but the operator's muscle memory and notes were written
+# in the old form. No aliases ship, because this flake was two hours old with a
+# single consumer when the rename landed — the moment for it was exactly then.
 #
 # A symlinkJoin, deliberately, not a single dispatching binary: each CLI stays
 # its own derivation, keeps its own `nix run .#<name>` app, and is shellchecked
 # and testable on its own. This only bundles them, so `home.packages` carries
 # one entry instead of drifting out of sync as CLIs are added — which already
-# happened once: extract-audio shipped as a flake package but was never added
+# happened once: media-extract-audio shipped as a flake package but was never added
 # to home.nix, so it was reachable by `nix run` and absent from PATH.
 #
 # TWO DIFFERENT MEMBERSHIP QUESTIONS, and conflating them is the mistake this
@@ -48,51 +79,53 @@
 # when this file lived in a mono-repo where separate-from-the-bundle and
 # separate-from-the-repo were the same thing. They no longer are.)
 #
-# fix-extension is the one member that changes no bytes — it only renames. It
+# media-fix-extension is the one member that changes no bytes — it only renames. It
 # still belongs: it operates directly on the selected media file and repairs it
 # for the same consumer (Finder/Photos) the other two serve, and the rule above
 # exists to exclude tools that never touch a file at all, not to require a
 # re-encode.
 #
-# fix-media is the odd one out in the other direction: it transforms nothing
+# media-fix is the odd one out in the other direction: it transforms nothing
 # itself, it DISPATCHES to the members that do. It belongs here because it is
 # the entry point the Finder Services actually call, and because splitting a
 # dispatcher from the things it dispatches to is how the two drift apart.
 #
-# photo-describe is the third edge case, and the closest call. It changes no
-# pixels — like fix-extension it only rewrites what the file SAYS about itself
+# media-describe is the third edge case, and the closest call. It changes no
+# pixels — like media-fix-extension it only rewrites what the file SAYS about itself
 # — and it is the only member with a soft dependency on a service (Ollama) that
 # lives outside its closure. It still belongs: it acts directly on the media
-# file the operator selected, and it repairs the same defect fix-extension does
+# file the operator selected, and it repairs the same defect media-fix-extension does
 # for the same consumer — a file Finder and Spotlight cannot answer questions
-# about. It is also the natural next stage AFTER fix-extension, whose --print0
-# seam it consumes exactly as fix-media does.
+# about. It is also the natural next stage AFTER media-fix-extension, whose --print0
+# seam it consumes exactly as media-fix does.
 #
-# The Ollama dependency is what keeps it from being folded into fix-media's
+# The Ollama dependency is what keeps it from being folded into media-fix's
 # --image pipeline: a repair must finish offline and in bounded time, and a
 # vision model is neither. So describing stays a separate, explicit verb.
 {
   symlinkJoin,
   callPackage,
-  fix-google-video ? callPackage ./fix-google-video.nix { },
-  extract-audio ? callPackage ./extract-audio.nix { },
-  fix-extension ? callPackage ./fix-extension.nix { },
-  fix-media ? callPackage ./fix-media.nix { },
-  photo-describe ? callPackage ./photo-describe.nix { },
+  media-transcode ? callPackage ./media-transcode.nix { },
+  media-extract-audio ? callPackage ./media-extract-audio.nix { },
+  media-fix-extension ? callPackage ./media-fix-extension.nix { },
+  media-fix ? callPackage ./media-fix.nix { },
+  media-describe ? callPackage ./media-describe.nix { },
   media ? callPackage ./media.nix { },
 }:
 symlinkJoin {
   name = "media-toolkit";
   paths = [
-    fix-google-video
-    extract-audio
-    fix-extension
-    fix-media
-    photo-describe
+    media-transcode
+    media-extract-audio
+    media-fix-extension
+    media-fix
+    media-describe
     media
   ];
   meta = {
-    description = "Local media-file CLIs: fix-google-video (re-encode editor-hostile video), extract-audio (pull out the audio track) fix-extension (rename files whose extension lies about their content), fix-media (repair a media file by class) and photo-describe (write an image's description/keywords into its own XMP)";
-    mainProgram = "fix-google-video";
+    description = "Local media-file CLIs: media-transcode (re-encode editor-hostile video), media-extract-audio (pull out the audio track) media-fix-extension (rename files whose extension lies about their content), media-fix (repair a media file by class) and media-describe (write an image's description/keywords into its own XMP)";
+    # `media`, not the first member alphabetically. The bundle's entry point is
+    # the dispatcher — that is what `nix run` on this package should give you.
+    mainProgram = "media";
   };
 }

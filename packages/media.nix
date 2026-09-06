@@ -7,14 +7,14 @@
 #
 # WHY THIS EXISTS: discoverability, not ergonomics. The five media CLIs are
 # individually well-named, but nothing tells an operator they are related, or
-# that `photo-describe` exists at all — `media <TAB>` and `media --help` do.
-# Typing `media describe` is LONGER than `photo-describe`, so if this were about
+# that `media-describe` exists at all — `media <TAB>` and `media --help` do.
+# Typing `media describe` is LONGER than `media-describe`, so if this were about
 # saving keystrokes it would be a net loss.
 #
 # IT IS PURELY ADDITIVE. Every underlying binary stays on PATH under its own
 # name, because three consumers already hardcode those names and must keep
 # working: the Finder Services bake absolute /nix/store paths into their
-# document.wflow, `nix run .#photo-describe` names the app, and the operator's
+# document.wflow, `nix run .#media-describe` names the app, and the operator's
 # own notes are written in the direct form. A dispatcher that REPLACED them
 # would be a breaking change bought for a shorter help listing.
 #
@@ -41,11 +41,11 @@
 #                     launchd StartInterval only; it is a tick, not a command,
 #                     and `media queue power-monitor` would invite running it
 #                     by hand, which does nothing useful.
-#   fix-extension     `--only`/`--print0` are a COMPOSITION seam for fix-media
-#                     and photo-describe, not a user feature. Promoting it
+#   media-fix-extension     `--only`/`--print0` are a COMPOSITION seam for media-fix
+#                     and media-describe, not a user feature. Promoting it
 #                     invites hand use of a flag pair that exists so two other
 #                     CLIs can pipeline through it.
-#   fix-google-video  `fix-media --video` is the discoverable name for it; the
+#   media-transcode  `media-fix --video` is the discoverable name for it; the
 #                     menu deliberately names the media CLASS, not the defect.
 #
 # `exec` rather than a wrapper function: the verb's own exit status, stdout and
@@ -54,10 +54,10 @@
 {
   writeShellApplication,
   callPackage,
-  fix-media ? callPackage ./fix-media.nix { },
-  extract-audio ? callPackage ./extract-audio.nix { },
-  photo-describe ? callPackage ./photo-describe.nix { },
-  # For the `queue` verb. media-queue takes fix-media/photo-describe rather
+  media-fix ? callPackage ./media-fix.nix { },
+  media-extract-audio ? callPackage ./media-extract-audio.nix { },
+  media-describe ? callPackage ./media-describe.nix { },
+  # For the `queue` verb. media-queue takes media-fix/media-describe rather
   # than the media-toolkit bundle precisely so this reference does not close a
   # cycle — see the parameter comment in packages/media-queue.nix.
   media-queue ? callPackage ./media-queue.nix { },
@@ -65,9 +65,9 @@
 writeShellApplication {
   name = "media";
   runtimeInputs = [
-    fix-media
-    extract-audio
-    photo-describe
+    media-fix
+    media-extract-audio
+    media-describe
     media-queue
   ];
   text = ''
@@ -90,7 +90,7 @@ writeShellApplication {
                                             the in-flight job
 
     Each command takes --help of its own. The underlying CLIs remain on PATH
-    under their own names (photo-describe, fix-media, extract-audio,
+    under their own names (media-describe, media-fix, media-extract-audio,
     media-queue-status, media-queue-top, media-queue-pause, media-queue-resume).
     EOF
     }
@@ -122,9 +122,9 @@ writeShellApplication {
     }
 
     case "''${1:-}" in
-      describe) shift; exec photo-describe "$@" ;;
-      fix)      shift; exec fix-media "$@" ;;
-      audio)    shift; exec extract-audio "$@" ;;
+      describe) shift; exec media-describe "$@" ;;
+      fix)      shift; exec media-fix "$@" ;;
+      audio)    shift; exec media-extract-audio "$@" ;;
       queue)    shift; queue "$@" ;;
       -h|--help|help|"") usage; [ $# -eq 0 ] && exit 1; exit 0 ;;
       *) echo "media: error: unknown command '$1'" >&2; usage; exit 1 ;;

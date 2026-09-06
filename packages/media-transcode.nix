@@ -1,4 +1,4 @@
-# fix-google-video — detect and re-encode video files with editor-incompatible
+# media-transcode — detect and re-encode video files with editor-incompatible
 # codecs (most commonly VP9-in-MP4, the "space saver" flavor Google Photos'
 # download button serves for videos not backed up at Original quality) into
 # H.264 + AAC, so they import cleanly into CapCut/Premiere/Final Cut/etc.
@@ -12,8 +12,8 @@
 # Saver / old "High quality" tier videos get transcoded server-side at
 # ingest, and what you download later is that transcode, not the original).
 #
-#   fix-google-video <file>...          # REPLACES the input; original -> Trash
-#   fix-google-video --keep <file>...   # write <name>_h264.mp4 alongside instead
+#   media-transcode <file>...          # REPLACES the input; original -> Trash
+#   media-transcode --keep <file>...   # write <name>_h264.mp4 alongside instead
 #
 # Idempotent -- already-editor-safe files are skipped, so re-running over a
 # folder is free.
@@ -37,14 +37,14 @@
   coreutils,
 }:
 writeShellApplication {
-  name = "fix-google-video";
+  name = "media-transcode";
   runtimeInputs = [
     ffmpeg
     gnugrep
     coreutils
   ];
   text = ''
-    prog=fix-google-video
+    prog=media-transcode
     die() { echo "$prog: error: $*" >&2; exit 1; }
     info() { echo "$prog: $*" >&2; }
 
@@ -92,7 +92,7 @@ writeShellApplication {
       # -f as "filesystem status", so an unqualified call silently reports no
       # flags and every dataless file would sail through. A dataless file is an
       # iCloud placeholder — ffprobe would materialise it, so a folder sweep
-      # would quietly pull gigabytes down and fail offline. (fix-extension
+      # would quietly pull gigabytes down and fail offline. (media-fix-extension
       # applies the same guard; these lines are duplicated rather than shared
       # because a sourced shell library costs more than it saves at this size.)
       case "$(/usr/bin/stat -f '%Sf' "$f" 2>/dev/null || true)" in

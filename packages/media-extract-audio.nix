@@ -1,8 +1,8 @@
-# extract-audio — pull the audio track out of a video file.
+# media-extract-audio — pull the audio track out of a video file.
 #
-#   extract-audio <file>...              # MP3 (the default)
-#   extract-audio --copy <file>...       # lossless: copy the stream as-is
-#   extract-audio --wav|--flac <file>... # other transcodes
+#   media-extract-audio <file>...              # MP3 (the default)
+#   media-extract-audio --copy <file>...       # lossless: copy the stream as-is
+#   media-extract-audio --wav|--flac <file>... # other transcodes
 #
 # MP3 is the default because it plays everywhere without a second thought,
 # which is what "extract the audio" is usually in service of.
@@ -19,7 +19,7 @@
 #
 # Output is written alongside the input; the original is never modified, and
 # an existing output is skipped, so a re-run over a folder is idempotent.
-# Timestamps are carried over — same reasoning as fix-google-video.nix, where
+# Timestamps are carried over — same reasoning as media-transcode.nix, where
 # a fresh mtime silently reorders a whole library.
 {
   writeShellApplication,
@@ -27,13 +27,13 @@
   coreutils,
 }:
 writeShellApplication {
-  name = "extract-audio";
+  name = "media-extract-audio";
   runtimeInputs = [
     ffmpeg
     coreutils
   ];
   text = ''
-    prog=extract-audio
+    prog=media-extract-audio
     die() { echo "$prog: error: $*" >&2; exit 1; }
     info() { echo "$prog: $*" >&2; }
 

@@ -49,8 +49,8 @@ let
   # repair: "Fix Video File(s)", not "Fix Google Video" or "Fix File Extension".
   # Someone whose photo has no thumbnail does not know that their `.png` is
   # really a JPEG — a menu of diagnoses asks them to diagnose it first, which is
-  # the one thing they came here unable to do. `fix-media` takes the class and
-  # decides what is actually wrong; see packages/fix-media.nix. `cmd` is
+  # the one thing they came here unable to do. `media-fix` takes the class and
+  # decides what is actually wrong; see packages/media-fix.nix. `cmd` is
   # therefore a command AND its flags, spliced ahead of "$@" in the runner.
   #
   # `sendTypes` decides which selections Finder offers the item on, and
@@ -60,7 +60,7 @@ let
     {
       name = "Extract Audio";
       id = "extractAudio";
-      cmd = "extract-audio"; # MP3 by default; --copy is the lossless path
+      cmd = "media-extract-audio"; # MP3 by default; --copy is the lossless path
       # NOT queued: extracting one track is seconds, so a round trip through
       # launchd would buy nothing.
       sendTypes = [ "public.movie" ];
@@ -71,7 +71,7 @@ let
       id = "fixVideo";
       cmd = "media-enqueue --video";
       # `public.folder` makes a whole export folder one right-click; the class
-      # filter inside fix-media is what stops it touching the photos in there.
+      # filter inside media-fix is what stops it touching the photos in there.
       sendTypes = [
         "public.movie"
         "public.folder"

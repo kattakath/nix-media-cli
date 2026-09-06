@@ -1,6 +1,6 @@
-# photo-describe — make a photo describe ITSELF, so you can find it later.
+# media-describe — make a photo describe ITSELF, so you can find it later.
 #
-#   photo-describe [--dry-run] [--overwrite] [--no-caption]
+#   media-describe [--dry-run] [--overwrite] [--no-caption]
 #                  [--model NAME] [--min-score N] <file-or-dir>...
 #
 # Why this exists: choosing which shot to post is a RETRIEVAL problem, and a
@@ -53,7 +53,7 @@
 # the tags live under "new IPTC Core 1.3 properties" in exiftool's XMP.pm, and
 # an `-XMP-iptcExt:AltTextAccessibility=` write silently fails.)
 #
-# THE WALK IS NOT REIMPLEMENTED. Stage one is `fix-extension --only image
+# THE WALK IS NOT REIMPLEMENTED. Stage one is `media-fix-extension --only image
 # --print0`, whose `--print0` seam exists for exactly this kind of caller. That
 # buys, for free and already tested, the recursive walk, the refusal to enter a
 # macOS package (`.photoslibrary`), and the three read-before-you-read guards:
@@ -121,7 +121,7 @@
 #
 # Output grammar (`done:` / `skip:` / `OK:` / `error:`, each naming the file in
 # single quotes) is the one shared with the other media CLIs — see
-# fix-extension.nix. It is a CONTRACT, not a style: media-queue's worker counts
+# media-fix-extension.nix. It is a CONTRACT, not a style: media-queue's worker counts
 # `done:` lines to report what changed and lifts the first `skip:`/`OK:` line as
 # the reason a batch changed nothing, so a CLI that invents its own vocabulary
 # is silently reported as having done nothing at all.
@@ -162,7 +162,7 @@
   jq,
   curl,
   coreutils,
-  fix-extension ? callPackage ./fix-extension.nix { },
+  media-fix-extension ? callPackage ./media-fix-extension.nix { },
   # The caption model, as a BUILD-TIME override rather than an env var. It has
   # to be one or the other and it cannot be both: `--model` already owns the
   # per-run axis, and a third source of truth (env) between the Nix default and
@@ -172,9 +172,9 @@
   defaultModel ? "huihui_ai/qwen3-vl-abliterated",
 }:
 writeShellApplication {
-  name = "photo-describe";
+  name = "media-describe";
   runtimeInputs = [
-    fix-extension
+    media-fix-extension
     auge
     exiftool
     jq
@@ -182,7 +182,7 @@ writeShellApplication {
     coreutils
   ];
   text = ''
-    prog=photo-describe
+    prog=media-describe
     usage="usage: $prog [--dry-run] [--overwrite] [--no-caption] [--model NAME] [--min-score N] <file-or-directory>..."
     die() { echo "$prog: error: $*" >&2; exit 1; }
     info() { echo "$prog: $*" >&2; }
@@ -245,7 +245,7 @@ writeShellApplication {
     [ $# -ge 1 ] || die "$usage"
 
     # Stage one: the walk, the package/dataless/in-flight/AppleDouble guards and
-    # the extension repair all belong to fix-extension. Its stdout is the
+    # the extension repair all belong to media-fix-extension. Its stdout is the
     # surviving file list (NUL-separated), its log goes to stderr.
     list=$(mktemp)
     tmpdir=$(mktemp -d)
@@ -253,11 +253,11 @@ writeShellApplication {
     rc=0
     # --dry-run MUST be forwarded. Stage one RENAMES files whose extension lies
     # about their content, so without this the one command meant to preview
-    # changes was itself mutating the tree. fix-extension's own --dry-run still
+    # changes was itself mutating the tree. media-fix-extension's own --dry-run still
     # emits the paths on --print0, so the rest of this run previews normally.
     stage1_flags=()
     [ "$dry" -eq 1 ] && stage1_flags+=(--dry-run)
-    fix-extension --only image --print0 ''${stage1_flags[@]+"''${stage1_flags[@]}"} "$@" \
+    media-fix-extension --only image --print0 ''${stage1_flags[@]+"''${stage1_flags[@]}"} "$@" \
       > "$list" 2> "$tmpdir/stage1.err" || rc=$?
     # Stage one's `OK:` lines say "nothing was wrong with the extension", which is
     # the normal case here and is never a reason for anything this CLI reports.
@@ -318,7 +318,7 @@ writeShellApplication {
     # exactly the wrong choice. UserComment is the least semantically loaded of
     # the survivors; the prefix keeps it identifiable and stops this from ever
     # claiming a comment the operator wrote.
-    stampPrefix="photo-describe:pixhash="
+    stampPrefix="media-describe:pixhash="
 
     described=0
     skipped=0
@@ -332,7 +332,7 @@ writeShellApplication {
         existing=$(printf '%s' "$meta" | jq -r '.[0].Description // ""' 2>/dev/null || true)
         stamped=$(printf '%s' "$meta" | jq -r '.[0].UserComment // ""' 2>/dev/null || true)
         # The stamp carries the pixel hash AND the labels this tool last wrote:
-        #   photo-describe:pixhash=<md5>;labels=a,b,c
+        #   media-describe:pixhash=<md5>;labels=a,b,c
         # The label list is what makes a re-describe able to remove ITS OWN stale
         # keywords without touching the operator's. Keywords are append-only by
         # design (clearing them was destroying hand-authored ones), so nothing
@@ -613,7 +613,7 @@ writeShellApplication {
     # Summary WITHOUT the grammar prefix. `OK: 'selection' — …` matched the
     # worker's skip:/OK: grep, so every describe job scored a phantom +1 skip and
     # could have its reason lifted from a line that names no file. Only the
-    # empty-selection case keeps the grammar form, exactly as fix-media does,
+    # empty-selection case keeps the grammar form, exactly as media-fix does,
     # because there it IS the outcome.
     info "summary: $described described, $skipped skipped"
     exit "$rc"

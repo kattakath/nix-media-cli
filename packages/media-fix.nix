@@ -1,7 +1,7 @@
-# fix-media — "my videos/photos are broken, fix them", by media class.
+# media-fix — "my videos/photos are broken, fix them", by media class.
 #
-#   fix-media --video <file-or-dir>...   # repair video files
-#   fix-media --image <file-or-dir>...   # repair image files
+#   media-fix --video <file-or-dir>...   # repair video files
+#   media-fix --image <file-or-dir>...   # repair image files
 #
 # This exists for the MENU, not for the shell. The Finder Services it backs are
 # named for what the operator has selected — "Fix Video File(s)", "Fix Image
@@ -13,15 +13,15 @@
 #
 # The per-class pipelines today:
 #
-#   --video   fix-extension --only video   then  fix-google-video
-#   --image   fix-extension --only image
+#   --video   media-fix-extension --only video   then  media-transcode
+#   --image   media-fix-extension --only image
 #
 # `--image` has exactly one step. That is not an oversight and not a stub: the
 # only image defect the fleet has met is the lying extension. The value it adds
 # is the discoverable name, and the place a second image repair goes when one
 # turns up.
 #
-# STAGE ORDER is load-bearing. fix-extension runs first and RENAMES its inputs,
+# STAGE ORDER is load-bearing. media-fix-extension runs first and RENAMES its inputs,
 # so stage two cannot be handed the original paths — it gets the resulting ones
 # from `--print0` (NUL-separated on stdout, diagnostics on stderr). Reading them
 # into an array rather than piping to xargs also means an empty selection ends
@@ -29,25 +29,25 @@
 # turning "nothing to fix" into a usage error the Service would report as a
 # failure.
 #
-# No --dry-run, deliberately: fix-google-video has none, so the flag could only
+# No --dry-run, deliberately: media-transcode has none, so the flag could only
 # ever rehearse half the pipeline while implying it rehearsed all of it. Preview
-# the rename half with `fix-extension --dry-run --only video` instead.
+# the rename half with `media-fix-extension --dry-run --only video` instead.
 {
   writeShellApplication,
   callPackage,
   coreutils,
-  fix-extension ? callPackage ./fix-extension.nix { },
-  fix-google-video ? callPackage ./fix-google-video.nix { },
+  media-fix-extension ? callPackage ./media-fix-extension.nix { },
+  media-transcode ? callPackage ./media-transcode.nix { },
 }:
 writeShellApplication {
-  name = "fix-media";
+  name = "media-fix";
   runtimeInputs = [
-    fix-extension
-    fix-google-video
+    media-fix-extension
+    media-transcode
     coreutils
   ];
   text = ''
-    prog=fix-media
+    prog=media-fix
     usage="usage: $prog <--video|--image> <file-or-directory>..."
     die() { echo "$prog: error: $*" >&2; exit 1; }
     info() { echo "$prog: $*" >&2; }
@@ -72,7 +72,7 @@ writeShellApplication {
     list=$(mktemp)
     trap 'rm -f "$list"' EXIT
     rc=0
-    fix-extension --only "$class" --print0 "$@" > "$list" || rc=$?
+    media-fix-extension --only "$class" --print0 "$@" > "$list" || rc=$?
 
     files=()
     while IFS= read -r -d "" f; do
@@ -80,7 +80,7 @@ writeShellApplication {
     done < "$list"
 
     if [ "$class" = video ] && [ ''${#files[@]} -gt 0 ]; then
-      fix-google-video "''${files[@]}" || rc=$?
+      media-transcode "''${files[@]}" || rc=$?
     fi
 
     [ ''${#files[@]} -gt 0 ] || info "OK: 'selection' — no $class files to look at"

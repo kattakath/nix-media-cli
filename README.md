@@ -16,7 +16,7 @@ variable, no stale menu item.
 ## Why
 
 A photo library answers no questions about itself. Finder sorts by date;
-`IMG_7454.jpg` tells you nothing. `photo-describe` writes what an image **is**
+`IMG_7454.jpg` tells you nothing. `media-describe` writes what an image **is**
 *into the image* — Apple Vision labels and a rating, plus a caption from a local
 vision model, as XMP that Spotlight already indexes. Then `mdfind` finds your
 photos, with no database in between and nothing leaving the machine.
@@ -32,11 +32,11 @@ the cheap, regenerable one is left to a tool like [`rclip`](https://github.com/y
 | Command | What it does |
 |---|---|
 | `media` | one entry point — `describe`, `fix`, `audio`, `queue` |
-| `photo-describe` | Vision labels + rating + a local-VLM caption → the image's own XMP |
-| `fix-media --video\|--image` | repair by media CLASS; decides what is actually wrong |
-| `fix-extension` | rename files whose extension lies about their content |
-| `fix-google-video` | re-encode editor-hostile codecs (VP9-in-MP4, AV1) to H.264+AAC |
-| `extract-audio` | pull the audio track out of a video |
+| `media-describe` | Vision labels + rating + a local-VLM caption → the image's own XMP |
+| `media-fix --video\|--image` | repair by media CLASS; decides what is actually wrong |
+| `media-fix-extension` | rename files whose extension lies about their content |
+| `media-transcode` | re-encode editor-hostile codecs (VP9-in-MP4, AV1) to H.264+AAC |
+| `media-extract-audio` | pull the audio track out of a video |
 | `media-enqueue` | hand work to the queue and return at once |
 | `media queue [top\|pause\|resume]` | inspect and control the queue |
 
@@ -98,7 +98,7 @@ a worker restart (the `MAINPID` pattern, borrowed from systemd by name).
 Or run a CLI without installing anything:
 
 ```bash
-nix run github:kattakath/nix-media-cli#photo-describe -- ~/Pictures/holiday
+nix run github:kattakath/nix-media-cli#media-describe -- ~/Pictures/holiday
 ```
 
 ## Options
@@ -107,7 +107,7 @@ nix run github:kattakath/nix-media-cli#photo-describe -- ~/Pictures/holiday
 |---|---|---|
 | `enable` | `false` | the whole switch |
 | `installQuickActions` | `true` | the four Finder right-click Services |
-| `visionModel` | `huihui_ai/qwen3-vl-abliterated` | baked into `photo-describe` at build time |
+| `visionModel` | `huihui_ai/qwen3-vl-abliterated` | baked into `media-describe` at build time |
 | `ollamaHost` | `127.0.0.1:11434` | exported as `OLLAMA_HOST` |
 | `logRelPath` | `Library/Logs/nix-media-queue.log` | where Console.app looks |
 | `extraSearchPackages` | `[ pkgs.exiftool ]` | companion tools; `[ ]` for none |
@@ -117,13 +117,13 @@ nix run github:kattakath/nix-media-cli#photo-describe -- ~/Pictures/holiday
 ## Requirements
 
 - **macOS on Apple Silicon.** Every package is `aarch64-darwin`-gated. This is
-  not the usual "shell scripts are portable" case: only `extract-audio` really
+  not the usual "shell scripts are portable" case: only `media-extract-audio` really
   is. The rest call `/usr/bin/mdls`, BSD `stat -f`, `/usr/bin/sips`,
   `/usr/bin/SetFile`, `~/.Trash`, Automator, or launchd.
 - **[`auge`](https://github.com/dnlmlr/auge)** for Apple's Vision framework, and
   **`exiftool`** for metadata. Both come from nixpkgs.
 - **[Ollama](https://ollama.com)** is a *soft* dependency. With it absent or the
-  model unpulled, `photo-describe` still writes labels and a rating, says so,
+  model unpulled, `media-describe` still writes labels and a rating, says so,
   and exits clean rather than leaving a library half-tagged.
 
 ## One thing to know before you enable it
