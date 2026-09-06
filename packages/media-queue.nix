@@ -492,6 +492,7 @@ symlinkJoin {
         # look at it again. Any retry job already older than a generous ceiling is
         # therefore reclaimed on the next worker start, which is the one moment we
         # know a worker exists to do it.
+        reclaims=0
         for held in "$STAGE"/*-retry.t*.job; do
           [ -e "$held" ] || continue
           if [ -n "$(find "$held" -mmin +2 2>/dev/null)" ]; then
@@ -499,7 +500,19 @@ symlinkJoin {
             # `$QUEUE_LOW` — same reasoning as the orphan recovery above:
             # the backoff TIMER died, not the job. Demoted for the same
             # reason, not because this job failed more than any other retry.
-            mv "$held" "$QUEUE_LOW/$(date +%s)-reclaimed.t$MAX_TRIES.job" 2>/dev/null || true
+            #
+            # `-$$-$reclaims`, THE SAME DISCRIMINATOR THE RETRY SITES CARRY, and
+            # for the same reason: this is a LOOP over every stranded retry, and
+            # `date +%s` is second-granularity. Two jobs reclaimed in one second
+            # produced one identical filename, the second `mv` silently
+            # overwrote the first, and a job disappeared with no error anywhere
+            # — the queue's own dead-letter path could not see it because the
+            # file never reached `failed/`. `$$` is needed on top of the
+            # counter: `reclaimed` names carried no pid, so two workers
+            # reclaiming in the same second collided even with a per-loop
+            # counter.
+            reclaims=$((reclaims + 1))
+            mv "$held" "$QUEUE_LOW/$(date +%s)-$$-$reclaims-reclaimed.t$MAX_TRIES.job" 2>/dev/null || true
           fi
         done
 
@@ -568,6 +581,9 @@ symlinkJoin {
         skipped=0
         failures=0
         jobs=0
+        # Discriminates one requeue from the next WITHIN this worker — see the
+        # collision measured at the retry site below.
+        requeues=0
         reason=
 
         while :; do
@@ -884,7 +900,17 @@ symlinkJoin {
             # its remaining jobs and exit; the move back is what re-arms launchd.
             next=$((tries + 1))
             backoff=$((next * next * 5))
-            held="$STAGE/$(date +%s)-$$-retry.t$next.job"
+            # `-$requeues`, the same per-item discriminator media-enqueue already
+            # puts in its own `$stamp-$$-$n` names, and for the same reason. Two
+            # jobs that fail in the SAME SECOND, in the same worker, at the same
+            # attempt number produced the identical `<epoch>-<pid>-retry.tN.job`
+            # here — and the second `mv` silently OVERWROTE the first, losing a
+            # job outright. MEASURED 2026-09-06 by checks/queue-state-machine.nix
+            # on its first run: two stub jobs failed 0s apart and staging/ held
+            # ONE file. `date +%s` is second-granularity, so this is not a narrow
+            # race — back-to-back failures are the common case.
+            requeues=$((requeues + 1))
+            held="$STAGE/$(date +%s)-$$-$requeues-retry.t$next.job"
             if mv "$running" "$held" 2>/dev/null; then
               log "requeueing '$path' for attempt $next after ''${backoff}s"
               # `$src_tier`, PRESERVED, not `$QUEUE`: this is the SAME
@@ -896,7 +922,7 @@ symlinkJoin {
               # job's `src_tier` afterward cannot change what this sleep
               # eventually moves the file back to.
               ( sleep "$backoff"
-                mv "$held" "$src_tier/$(date +%s)-$$-retry.t$next.job" 2>/dev/null || true
+                mv "$held" "$src_tier/$(date +%s)-$$-$requeues-retry.t$next.job" 2>/dev/null || true
               ) &
               disown 2>/dev/null || true
             else
