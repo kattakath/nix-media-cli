@@ -194,6 +194,15 @@
                   }
                   echo ok > "$out"
                 '';
+
+              # The only check here that EXECUTES the queue rather than
+              # evaluating or building it — see checks/queue-state-machine.nix
+              # for what the build sandbox can and cannot run, and for the two
+              # state-machine paths (/bin/ps: pause, adoption) it deliberately
+              # does not claim to cover. `import` with `inherit pkgs`, matching
+              # `host-is-baked` above: it needs the package FUNCTION, wired to
+              # stubs, not the ready-made graph in lib/packages.nix.
+              queue-state-machine = import ./checks/queue-state-machine.nix { inherit pkgs; };
             }
             // self.packages.${system}
           );
