@@ -204,13 +204,62 @@ let
       [ $# -eq 0 ] || { echo "usage: $prog" >&2; exit 1; }
       ensure_dirs
 
+      # ONE 6-WIDE RIGHT-ALIGNED NUMBER GUTTER, USED BY EVERY ROW BELOW —
+      # this is the whole anti-jitter mechanism. Counts grow LEFTWARD into
+      # the padding, so nothing to the right of a number moves when it goes
+      # 9 -> 10 -> 100. media-queue-top redraws this through `viddy -n 2`
+      # every 2s, and a column that shifts under a redraw is exactly what
+      # makes a top unreadable.
+      #
+      # `printf`, not `column -t`. The off-the-shelf tool IS available — this
+      # file already takes `util-linuxMinimal` as an argument, so its `column`
+      # (with `-R`) is one runtimeInput away, and an earlier version of this
+      # comment claimed the opposite. That claim was wrong and is retracted.
+      #
+      # The real reason is what `column` does to the OTHER rows: it reflows on
+      # whitespace, and the per-job `'$path'` and `last:` rows are single
+      # free-text fields that contain spaces. `column -t` splits them into
+      # columns at every space and the row stops being one field. printf is the
+      # POSIX primitive for a fixed column, costs no input, and leaves free
+      # text alone.
+      row() { printf '%6s  %s\n' "$1" "$2"; }
+
+      # COLOUR IS DECORATION, NEVER THE CARRIER — every alarm below is also
+      # a capitalised word at a fixed column, so the monochrome path loses
+      # no information. Selected with the conventions that already exist
+      # rather than a new flag: CLICOLOR_FORCE (what BSD userland on this
+      # Mac already honours) to force on, NO_COLOR (no-color.org) to force
+      # off. A `--color` flag is impossible here anyway — this tool's
+      # contract is ZERO arguments, enforced by the usage check above.
+      # `-t 1` is the default test because BOTH non-interactive cases have
+      # no tty: `media queue > log`, and a launchd context, where launchd
+      # hands a job a pipe or a file and never a pty. So ANSI can never
+      # reach a redirected file.
+      B=""
+      R=""
+      Z=""
+      if [ -n "''${CLICOLOR_FORCE:-}" ] ||
+         { [ -t 1 ] && [ -z "''${NO_COLOR:-}" ] && [ "''${TERM:-dumb}" != dumb ]; }; then
+        B=$'\033[1m'
+        R=$'\033[1;31m'
+        Z=$'\033[0m'
+      fi
+
       pending_high=$(find "$QUEUE_HIGH" -maxdepth 1 -name '*.job' -type f 2>/dev/null | wc -l | tr -d ' ')
       pending=$(find "$QUEUE" -maxdepth 1 -name '*.job' -type f 2>/dev/null | wc -l | tr -d ' ')
       pending_low=$(find "$QUEUE_LOW" -maxdepth 1 -name '*.job' -type f 2>/dev/null | wc -l | tr -d ' ')
       backoff=$(find "$STAGE" -maxdepth 1 -name '*-retry.t*.job' -type f 2>/dev/null | wc -l | tr -d ' ')
       dead=$(find "$FAILED" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
 
-      any_running=0
+      # BUFFERED, NOT STREAMED. Line 1 has to state the aggregate state and
+      # the failed count, but the state is only known once this loop has
+      # inspected every marker — so the per-job rows are collected here and
+      # printed after the banner. `body=()` is declared before use, which is
+      # what makes "''${body[@]}" and "''${#body[@]}" safe on an EMPTY array
+      # under `set -u` (bash >= 4.4; writeShellApplication gives us bash 5).
+      body=()
+      running_n=0
+      banner_pause=""
       for running in "$STATE"/running-*.job; do
         [ -e "$running" ] || continue
         wpid=''${running##*/running-}
@@ -234,12 +283,12 @@ let
           # bug, and reported ONLY when there is truly no live worker
           # left to reclaim it on its own.
           if [ -z "$wpid" ] || ! kill -0 "$wpid" 2>/dev/null; then
-            echo "$prog: stale marker $(basename "$running") — will self-heal on next worker start"
+            body+=("$(row stale "$(basename "$running") — will self-heal on next worker start")")
           fi
           continue
         fi
 
-        any_running=1
+        running_n=$((running_n + 1))
         if [ -n "$wpid" ] && kill -0 "$wpid" 2>/dev/null; then
           owner="worker $wpid"
         else
@@ -266,7 +315,25 @@ let
           "") label="gone" ;;
           *)  label="running" ;;
         esac
-        echo "$prog: $class '$path' — $label, pid $jpid ($owner)"
+        # The FIRST paused job's label is what line 1 shows, reused
+        # VERBATIM rather than re-worded: `PAUSED (Low Power Mode, auto)`
+        # and `PAUSED (SIGSTOP, manual)` are the distinction this tool
+        # exists to make, and a second spelling of them is a second thing
+        # to keep in sync.
+        if [ -z "$banner_pause" ]; then
+          case "$label" in PAUSED*) banner_pause="$label" ;; esac
+        fi
+        # THREE ROWS, NOT ONE SENTENCE. `$owner` gets its own row because
+        # its alarm case — `ORPHANED — ...` — used to sit inside a `(...)`
+        # suffix whose column moved with the width of `$jpid`; on its own
+        # row the word ORPHANED is at column 9 on every single refresh.
+        # `%-8s` on $class does the same for $label, pinning
+        # PAUSED/running/gone at column 19 regardless of
+        # video/image/describe.
+        if [ "''${#body[@]}" -gt 0 ]; then body+=(""); fi
+        body+=("$(printf '%6s  %-8s  %s' job "$class" "$label · pid $jpid")")
+        body+=("$(row "" "'$path'")")
+        body+=("$(row owner "$owner")")
 
         # The scratch file is a bare mktemp with no name this tool ever
         # recorded — media-worker's own choice, on purpose (see its
@@ -280,16 +347,161 @@ let
           sk=$(grep -cE ': (skip|OK):' "$scratch" 2>/dev/null || true)
           er=$(grep -c ': error:' "$scratch" 2>/dev/null || true)
           last=$(tail -n1 "$scratch" 2>/dev/null || true)
-          echo "$prog:   progress so far: $((d + sk + er)) processed ($d done, $sk skip/OK, $er error)"
-          [ -n "$last" ] && echo "$prog:   last: $last"
+          proc=$((d + sk + er))
+          erpart="$er error"
+          if [ "$er" -gt 0 ]; then erpart="$R$er error$Z"; fi
+          body+=("$(row "$proc" "processed · $d done · $sk skip/OK · $erpart")")
+
+          # RATE FROM STATE THAT ALREADY EXISTS — no new file, no tracking.
+          # media-worker creates `$scratch` with a bare `mktemp` in the
+          # instant BEFORE it dispatches the job and `rm -f`s it when the
+          # job ends, so the file's APFS BIRTH time IS this job's start
+          # instant. It is the only one in the system: the `running-*.job`
+          # marker arrives by `mv`, which carries the job file's ENQUEUE
+          # mtime, not the moment it was dequeued.
+          #
+          # NO ETA, DELIBERATELY. A job is a PATH that may be a whole
+          # folder; neither the job file nor the CLIs emit a total, and the
+          # pending counters below count JOBS whose fan-out is unknown. Any
+          # "time remaining" here would be a number this tool invented, so
+          # the measured half ships and the modelled half does not.
+          #
+          # `/usr/bin/stat` BY ABSOLUTE PATH: coreutils is on runtimeInputs
+          # and writeShellApplication PREPENDS it to PATH, so bare `stat` is
+          # GNU stat — where `-f` means `--file-system`, silently turning
+          # this into dead code. Same reason `/bin/ps` and `/usr/sbin/lsof`
+          # above are absolute.
+          # MEASURED 2026-09-06, because "APFS supports birthtime" is a claim
+          # about the filesystem, not about this path: a file made by `mktemp`
+          # under launchd's own TMPDIR (/var/folders/ns/.../T) reported
+          # `%B` = 1788697810 against `date +%s` = 1788697810 — the same second,
+          # not 0. The digits-only guard below is defence against a filesystem
+          # that answers differently, not cover for an unknown.
+          started=$(/usr/bin/stat -f %B "$scratch" 2>/dev/null || true)
+          # The empty case is written as `""` and placed LAST, deliberately.
+          # Spelling it as a bare pair of single quotes would END the enclosing
+          # Nix indented string right there, so the file stops parsing and the
+          # code never reaches shellcheck at all. (Writing this very comment
+          # with the literal sequence in it broke the parse the same way — the
+          # hazard is the two characters, not where they appear.) Avoiding the
+          # sequence beats escaping it: a future edit cannot silently re-break
+          # what is not there.
+          case "$started" in *[!0-9]*|"") started="" ;; esac
+          if [ -n "$started" ] && [ "$started" -gt 0 ]; then
+            elapsed=$(( $(date +%s) - started ))
+            # Clamped, not trusted: a job under a second old, or a clock
+            # nudged backwards, would otherwise divide by zero or a
+            # negative and take the whole script down under `set -e`.
+            if [ "$elapsed" -lt 1 ]; then elapsed=1; fi
+            # Integer arithmetic x10 for one decimal place. A describe
+            # batch runs at single-digit items/min, where a bare integer
+            # rate reads "0" for minutes at a time and looks stuck.
+            r=$(( proc * 600 / elapsed ))
+            body+=("$(row "$((r / 10)).$((r % 10))" \
+              "per min · elapsed $(printf '%d:%02d' "$((elapsed / 60))" "$((elapsed % 60))")")")
+          fi
+
+          # `if`, NOT `[ -n "$last" ] && echo`. That shape is this repo's
+          # known `set -e` landmine — it returns 1 on an empty `$last` and
+          # kills the script the moment it becomes the last statement in a
+          # block. It survived here only by accident of position.
+          if [ -n "$last" ]; then body+=("$(row last "$last")"); fi
         fi
       done
 
-      if [ "$any_running" -eq 0 ]; then
-        echo "$prog: worker idle — nothing in flight"
+      # "IDLE" WITH JOBS QUEUED IS A LIE OF OMISSION, and it cost real time to
+      # learn that. MEASURED 2026-09-06: with Low Power Mode on and one job
+      # enqueued, this command said `worker idle — nothing in flight` and
+      # `1 normal pending`. Read literally that is a STUCK queue, and it was
+      # read that way — three diagnostic steps down a "the worker will not
+      # start" path before `pmset -g` showed lowpowermode 1 and the log showed
+      # the worker had run five times and correctly deferred each time. The
+      # tool knew exactly why nothing was happening and said none of it; the
+      # reason existed only in ~/Library/Logs/nix-media-queue.log.
+      #
+      # HELD, not IDLE: idle means there is nothing to do, held means there is
+      # work and something is holding it. `lowpower_active` is the same probe
+      # the worker itself defers on (shared prelude), so this reports the
+      # worker's ACTUAL gate rather than a second guess at it — if the worker
+      # would defer, this says so, by construction.
+      #
+      # Only when jobs are actually waiting: Low Power Mode with an empty queue
+      # is genuinely idle, and saying HELD there would be the same crime in the
+      # other direction.
+      pending_total=$((pending_high + pending + pending_low))
+      if [ -n "$banner_pause" ]; then
+        banner="$banner_pause"
+      elif [ "$running_n" -gt 0 ]; then
+        banner="RUNNING  $running_n in flight"
+      elif [ "$pending_total" -gt 0 ] && [ "$(lowpower_active)" = "1" ]; then
+        banner="HELD  Low Power Mode"
+        # The REASON goes in the body, not the banner: the banner shares line 1
+        # with the FAILED alarm at a fixed column, so a long one collides with
+        # it (measured: the first draft of this banner was 56 columns against a
+        # 34-column pad and printed `...it is offFAILED 1`). Line 1 is the
+        # STATE; the body is where a state gets explained.
+        body+=("$(row "" "the worker defers until Low Power Mode is off")")
+      else
+        banner="IDLE  nothing in flight"
+      fi
+      # STATE AS ONE WORD, AND THE ONE ACTIONABLE NUMBER, BOTH ON LINE 1.
+      # `dead` is the only counter here that never drains on its own —
+      # pending and backoff resolve themselves — so it is the alarm, and it
+      # is printed KEYWORD-FIRST at a fixed column 35 instead of last in a
+      # five-counter sentence.
+      #
+      # MEASURED on the old form, per line, with `wc -L` — DISPLAY columns,
+      # not `wc -c` bytes (the em dash is 3 bytes and 1 column, and counting
+      # bytes is how a width claim goes wrong):
+      #     idle line     51 columns  — fits 80
+      #     counter line 106 columns  — WRAPS an 80-col terminal, and
+      #                                 `1 dead-letter` was the last thing on
+      #                                 the wrapped half
+      # 20 of that 106 are the `media-queue-status: ` prefix, and it is on
+      # BOTH lines, redrawn every 2s by viddy. stdout drops it; the usage line
+      # KEEPS it, because that one goes to a shared stderr where a prefix does
+      # disambiguate.
+      #
+      # WHAT THIS DOES NOT FIX, stated because the number above invites the
+      # wrong conclusion: only the idle output is bounded (51 -> under 40).
+      # The per-job `'$path'` and `last:` rows carry an operator's real photo
+      # path and a CLI's real error text verbatim, so they are unbounded and
+      # can still exceed 80. Truncating them to `$COLUMNS` is a separate
+      # decision about hiding operator data, not a width fix.
+      #
+      # The padding is applied to the RAW banner with the colour codes as
+      # SEPARATE printf arguments — escape bytes inside a `%-34s` field are
+      # counted as width and would shift the alarm column by 4 to 8 chars.
+      if [ "$dead" -gt 0 ]; then
+        # `%-34s` pads a SHORT banner to the alarm column; it does not
+        # TRUNCATE a long one, so a banner past 34 columns runs straight into
+        # `FAILED` with no separator. Measured on a 56-column banner:
+        # `...until it is offFAILED 1 (failed/)`. Two spaces after the field
+        # cost nothing when the pad already applies and are the difference
+        # between a collision and a wide line when it does not.
+        printf '%s%-34s%s  %s%s%s\n' "$B" "$banner" "$Z" "$R" "FAILED $dead (failed/)" "$Z"
+      else
+        printf '%s%s%s\n' "$B" "$banner" "$Z"
+      fi
+      echo
+
+      if [ "''${#body[@]}" -gt 0 ]; then
+        printf '%s\n' "''${body[@]}"
+        echo
       fi
 
-      echo "$prog: queue: $pending_high high, $pending normal, $pending_low low pending, $backoff backing off (retry), $dead dead-letter (failed/)"
+      # ZERO ROWS ARE NOT PRINTED AT ALL. A `0 high` sitting next to a
+      # `12 normal` reads as data and costs a scan for nothing — four of the
+      # five counters were zero in the measured idle case above. A fully
+      # empty queue still gets exactly ONE row, so "empty" can never be
+      # confused with "this printed nothing because it broke", and that row
+      # carries `-` rather than `0` so it cannot be read as a count either.
+      queued=0
+      if [ "$pending_high" -gt 0 ]; then row "$pending_high" 'high pending'; queued=1; fi
+      if [ "$pending" -gt 0 ]; then row "$pending" 'normal pending'; queued=1; fi
+      if [ "$pending_low" -gt 0 ]; then row "$pending_low" 'low pending'; queued=1; fi
+      if [ "$backoff" -gt 0 ]; then row "$backoff" 'retry (backing off)'; queued=1; fi
+      if [ "$queued" -eq 0 ]; then row - 'queue empty'; fi
     '';
   };
 in
