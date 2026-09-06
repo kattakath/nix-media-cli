@@ -46,65 +46,13 @@
         {
           formatter = pkgs.nixfmt-rfc-style;
 
+          # ONE graph, shared with modules/media-cli.nix — see lib/packages.nix
+          # for why a second copy here is where an option goes to die.
           packages = pkgs.lib.optionalAttrs (system == "aarch64-darwin") (
             let
-              # Named so siblings can be threaded in explicitly rather than
-              # re-instantiated: callPackage's defaults would otherwise build a
-              # SECOND media-fix-extension for media-fix and a third for
-              # media-describe, and the three could drift.
-              media-fix-extension = pkgs.callPackage ./packages/media-fix-extension.nix { };
-              media-transcode = pkgs.callPackage ./packages/media-transcode.nix { };
-              media-extract-audio = pkgs.callPackage ./packages/media-extract-audio.nix { };
-              media-fix = pkgs.callPackage ./packages/media-fix.nix {
-                inherit media-fix-extension media-transcode;
-              };
-              media-describe = pkgs.callPackage ./packages/media-describe.nix { inherit media-fix-extension; };
-              # media-queue takes the two CLIs its worker dispatches to, NOT the
-              # media-toolkit bundle — that bundle contains `media`, and `media`
-              # has a `queue` verb, so the bundle would close an eval cycle.
-              media-queue = pkgs.callPackage ./packages/media-queue.nix { inherit media-fix media-describe; };
-              media = pkgs.callPackage ./packages/media.nix {
-                inherit
-                  media-fix
-                  media-extract-audio
-                  media-describe
-                  media-queue
-                  ;
-              };
-              media-toolkit = pkgs.callPackage ./packages/media-toolkit.nix {
-                inherit
-                  media-transcode
-                  media-extract-audio
-                  media-fix-extension
-                  media-fix
-                  media-describe
-                  media
-                  ;
-              };
+              graph = import ./lib/packages.nix { inherit pkgs; };
             in
-            {
-              inherit
-                media-fix-extension
-                media-transcode
-                media-extract-audio
-                media-fix
-                media-describe
-                media-queue
-                media
-                media-toolkit
-                ;
-              media-quick-actions = pkgs.callPackage ./packages/media-quick-actions.nix {
-                inherit media-toolkit media-queue;
-              };
-              # In the flake, deliberately NOT in media-toolkit — see the two
-              # membership questions in packages/media-toolkit.nix. Both are
-              # opt-in in the module: fidelity-enhance pulls ~1 GB of
-              # torch/insightface on first run, and obs-fb-setup is inert until
-              # you put FB_PERSISTENT_STREAM_KEY in the login Keychain.
-              fidelity-enhance = pkgs.callPackage ./packages/fidelity-enhance.nix { };
-              obs-fb-setup = pkgs.callPackage ./packages/obs-fb-setup.nix { };
-              default = media-toolkit;
-            }
+            graph // { default = graph.media-toolkit; }
           );
 
           # Every package gets an app. In the mono-repo this had drifted to 3 of
@@ -135,18 +83,30 @@
 
           checks = pkgs.lib.optionalAttrs (system == "aarch64-darwin") (
             let
-              hm = home-manager.lib.homeManagerConfiguration {
-                inherit pkgs;
-                modules = [
-                  self.homeManagerModules.default
-                  {
-                    home.username = "tester";
-                    home.homeDirectory = "/Users/tester";
-                    home.stateVersion = "24.05";
-                    programs.mediaCli.enable = true;
-                  }
-                ];
-              };
+              mkHm =
+                extra:
+                home-manager.lib.homeManagerConfiguration {
+                  inherit pkgs;
+                  # `extra` is its OWN module, never `base // extra`: `//` is a
+                  # SHALLOW merge, so `{ programs.mediaCli.ollamaHost = …; }`
+                  # replaces the whole `programs` attrset and takes
+                  # `programs.mediaCli.enable = true` with it — the module then
+                  # defines no agents at all and the assertion below dies on a
+                  # missing attribute instead of testing anything. The module
+                  # system merges module lists deeply; that is its job.
+                  modules = [
+                    self.homeManagerModules.default
+                    {
+                      home.username = "tester";
+                      home.homeDirectory = "/Users/tester";
+                      home.stateVersion = "24.05";
+                      programs.mediaCli.enable = true;
+                    }
+                    extra
+                  ];
+                };
+              hm = mkHm { };
+              workerArg0 = c: builtins.head c.config.launchd.agents.media-queue.config.ProgramArguments;
             in
             {
               # The module's whole job is the wiring, so assert the wiring:
@@ -168,6 +128,52 @@
                   test "${toString agents.media-queue-power.config.StartInterval}" = "20"
                   case "${builtins.baseNameOf arg0}" in nix-*) ;; *) echo "arg0 must be nix-*: ${arg0}" >&2; exit 1 ;; esac
                   case "${arg0}" in /nix/store/*) ;; *) echo "arg0 must be a store path: ${arg0}" >&2; exit 1 ;; esac
+                  echo ok > "$out"
+                '';
+
+              # REGRESSION GUARD for a bug this repo actually shipped: an
+              # `ollamaHost` that reached the interactive CLI and NOT the launchd
+              # worker, because its only delivery was `home.sessionVariables` and
+              # a launchd agent inherits no shell profile. Ollama is a SOFT
+              # dependency, so the worker did not fail — it wrote labels with no
+              # caption and said "no ollama at ...". Silent, and invisible while
+              # the option's default happened to equal the tool's own fallback.
+              #
+              # Asserted as INEQUALITY rather than by grepping a closure: if the
+              # host does not reach the worker, the two agents are byte-identical
+              # and their arg0 is the same store path. That is exactly the old
+              # behaviour, and it is a pure evaluation — no closure walk, no
+              # sandbox question about whether a runtime reference is present.
+              host-reaches-worker =
+                let
+                  a = workerArg0 (mkHm { programs.mediaCli.ollamaHost = "127.0.0.1:11434"; });
+                  b = workerArg0 (mkHm { programs.mediaCli.ollamaHost = "sentinel.invalid:65000"; });
+                in
+                pkgs.runCommand "media-cli-host-reaches-worker" { } ''
+                  test "${a}" != "${b}" || {
+                    echo "programs.mediaCli.ollamaHost does not reach the launchd worker" >&2
+                    echo "both hosts produced arg0: ${a}" >&2
+                    exit 1
+                  }
+                  echo ok > "$out"
+                '';
+
+              # The other half: prove the value is actually BAKED, not merely
+              # that something in the closure moved. Greps the generated script
+              # for a host no resolver will ever answer.
+              host-is-baked =
+                let
+                  describe =
+                    (import ./lib/packages.nix {
+                      inherit pkgs;
+                      defaultHost = "http://sentinel.invalid:65000";
+                    }).media-describe;
+                in
+                pkgs.runCommand "media-cli-host-is-baked" { } ''
+                  grep -q 'sentinel\.invalid:65000' ${describe}/bin/media-describe || {
+                    echo "defaultHost is not baked into media-describe" >&2
+                    exit 1
+                  }
                   echo ok > "$out"
                 '';
             }
